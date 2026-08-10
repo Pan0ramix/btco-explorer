@@ -508,3 +508,57 @@ function lx_mining_pool_hashrate_api(array $net, string $slug): array
     }
     return $out;
 }
+
+/**
+ * Network-activity timeseries (Tier E) as clean snake_case JSON: active addresses, coin-days-
+ * destroyed, transactions, new addresses, and median/p10/p90 tx value (sat) per UTC day.
+ */
+function lx_activity_api(array $net, string $period): array
+{
+    $out = [];
+    foreach ((function_exists('lx_activity_series') ? lx_activity_series($net, $period) : []) as $r) {
+        $out[] = [
+            'day'                 => (int) $r['day'],
+            'active_addresses'    => (int) round($r['active']),
+            'coin_days_destroyed' => round((float) $r['cdd'], 4),
+            'transactions'        => (int) round($r['txs']),
+            'new_addresses'       => (int) round($r['newAddr'] ?? 0),
+            'median_tx_value_sat' => (int) round($r['medVal'] ?? 0),
+            'p10_tx_value_sat'    => (int) round($r['p10Val'] ?? 0),
+            'p90_tx_value_sat'    => (int) round($r['p90Val'] ?? 0),
+        ];
+    }
+    return $out;
+}
+
+/** HODL-wave coin-age distribution: transparent supply bucketed by coin age at the last snapshot. */
+function lx_coin_age_api(array $net): array
+{
+    $bands = function_exists('lx_utxo_age_bands') ? lx_utxo_age_bands($net) : [];
+    $out = ['as_of' => 0, 'bands' => [], 'realized' => function_exists('lx_realized') ? lx_realized($net) : null];
+    foreach ($bands as $b) {
+        $out['as_of']   = (int) ($b['as_of'] ?? 0);
+        $out['bands'][] = ['label' => (string) $b['label'], 'min_days' => (int) $b['min_days'], 'sat' => (int) $b['sat'], 'coins' => (int) $b['coins']];
+    }
+    return $out;
+}
+
+/** Rich-list page as JSON: wealth summary (supply/Gini/top-N/bands) + the top holders. */
+function lx_richlist_api(array $net, int $limit): array
+{
+    $limit = max(1, min(1000, $limit));
+    return [
+        'summary' => function_exists('lx_wealth_summary') ? lx_wealth_summary($net) : null,
+        'top'     => function_exists('lx_richlist_top') ? lx_richlist_top($net, $limit) : [],
+    ];
+}
+
+/** Halving countdown as JSON: block-exact figures + estimated date. */
+function lx_halving_api(array $net): ?array
+{
+    $s = function_exists('lx_supply_info') ? lx_supply_info($net) : null;
+    if (!$s) {
+        return null;
+    }
+    return $s + ['tip_height' => lx_tip_height($net)];
+}

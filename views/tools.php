@@ -14,18 +14,22 @@ $testRes = $testErr = null;
 $scriptRes = $scriptErr = null;
 $psbtRes = $psbtErr = null;
 $orRes = $orErr = null;
-$vm = null; $vmDone = false;
+$vm = null; $vmDone = false; $vmErr = null;
 
-// Node-hitting POST actions (broadcast/test/decode forward hex to litecoind for a full
-// parse). Throttle per IP so the tools page can't be scripted into an amplification flood.
-if ($isPost && in_array($action, ['broadcast', 'test', 'decode'], true)
+// Node-hitting POST actions forward user input to litecoind for a full parse (broadcast/test/
+// decode/script/psbt/verifymsg all reach lx_rpc*). Throttle every one per IP so the tools page
+// can't be scripted into an amplification flood. (opreturn is pure local encoding - not listed.)
+if ($isPost && in_array($action, ['broadcast', 'test', 'decode', 'script', 'psbt', 'verifymsg'], true)
     && function_exists('lx_rate_limit') && !lx_rate_limit('tools_tx', 30, 60)) {
     http_response_code(429);
     $isPost = false;   // skip the node calls; surface a friendly notice instead
     $rlMsg = 'Rate limit reached. Please wait a minute and try again.';
-    if ($action === 'broadcast') { $bcError = $rlMsg; }
-    elseif ($action === 'test')  { $testErr = $rlMsg; }
-    else                         { $decError = $rlMsg; }
+    if ($action === 'broadcast')     { $bcError = $rlMsg; }
+    elseif ($action === 'test')      { $testErr = $rlMsg; }
+    elseif ($action === 'decode')    { $decError = $rlMsg; }
+    elseif ($action === 'script')    { $scriptErr = $rlMsg; }
+    elseif ($action === 'psbt')      { $psbtErr = $rlMsg; }
+    elseif ($action === 'verifymsg') { $vmErr = $rlMsg; $vmDone = true; }
 }
 
 if ($isPost && $action === 'broadcast') {
@@ -271,7 +275,8 @@ lx_head($net, ['title' => 'Tools - ' . $net['label'] . ' Explorer']);
       <textarea name="msg" rows="2"><?= $action === 'verifymsg' ? h($_POST['msg'] ?? '') : '' ?></textarea>
       <div class="row mt-2"><button class="btn" type="submit">Verify</button></div>
     </form>
-    <?php if ($vmDone): ?>
+    <?php if ($vmErr !== null): ?><div class="note bad"><?= h($vmErr) ?></div>
+    <?php elseif ($vmDone): ?>
       <?php if ($vm === true): ?><div class="note ok">Valid signature.</div>
       <?php elseif ($vm === false): ?><div class="note bad">Invalid signature.</div>
       <?php else: ?><div class="note bad">Could not verify (bad address or signature format).</div><?php endif; ?>

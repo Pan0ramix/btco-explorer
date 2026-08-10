@@ -26,6 +26,33 @@ foreach ($nets as $n) {
             $r['items'][] = ['label' => 'MWEB', 'ok' => true, 'note' => 'RPC mode'];
         }
     }
+    // Analytics indexes (OPTIONAL - they power charts/rich list; "not built" until their cron or
+    // one-time backfill has run, and never affect the overall online/offline verdict above).
+    $tipH = !empty($h['rpc']['ok']) ? (int) $h['rpc']['height'] : 0;
+    if (function_exists('lx_blockindex_range')) {
+        $bi = lx_blockindex_range($n);
+        if (($bi['count'] ?? 0) > 0) {
+            $lag = ($tipH > 0 && $bi['max'] !== null) ? max(0, $tipH - (int) $bi['max']) : null;
+            $r['items'][] = ['label' => 'Block-economics index', 'ok' => true, 'note' => commas((int) $bi['count']) . ' blocks' . ($lag !== null ? ' · tip-lag ' . commas($lag) : '')];
+        } else {
+            $r['items'][] = ['label' => 'Block-economics index', 'ok' => false, 'note' => 'not built (optional)'];
+        }
+    }
+    if (function_exists('lx_activity_meta')) {
+        $am = lx_activity_meta($n);
+        if ($am && (int) $am['day_to'] > 0) {
+            $lag = $tipH > 0 ? max(0, $tipH - (int) $am['height']) : null;
+            $r['items'][] = ['label' => 'Activity index', 'ok' => true, 'note' => 'through ' . gmdate('Y-m-d', (int) $am['day_to']) . ($lag !== null ? ' · tip-lag ' . commas($lag) : '')];
+        } else {
+            $r['items'][] = ['label' => 'Activity index', 'ok' => false, 'note' => 'not built (optional)'];
+        }
+    }
+    if (function_exists('lx_wealth_summary')) {
+        $ws = lx_wealth_summary($n);
+        $r['items'][] = $ws
+            ? ['label' => 'Rich-list index', 'ok' => true, 'note' => 'updated ' . gmdate('Y-m-d', (int) $ws['updated'])]
+            : ['label' => 'Rich-list index', 'ok' => false, 'note' => 'not built (optional)'];
+    }
     $rows[] = $r;
 }
 $allUp = $rows ? array_reduce($rows, function ($c, $r) { return $c && $r['up']; }, true) : false;

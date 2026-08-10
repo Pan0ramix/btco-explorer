@@ -113,16 +113,59 @@ function lx_cache_evict(PDO $db): void
     }
 }
 
-/** Get-or-compute helper. $producer returns a value that is JSON-encoded. */
+/**
+ * Get-or-compute helper with single-flight (stampede) protection. $producer
+ * returns a value that is JSON-encoded. When a hot short-TTL key expires, only
+ * the FIRST concurrent caller recomputes; every other in-flight caller serves
+ * the grace-extended stale value instead of also hammering the node/electrs.
+ */
 function cache_remember(string $key, int $ttl, callable $producer)
 {
-    $hit = cache_get($key);
-    if ($hit !== null) {
-        $decoded = json_decode($hit, true);
-        if ($decoded !== null || $hit === 'null') {
-            return $decoded;
+    $db = lx_cache_pdo();
+    if (!$db) {
+        return $producer();                          // no cache -> just compute (best-effort)
+    }
+    $now = time();
+    $row = null;
+    try {
+        $st = $db->prepare('SELECT v, exp FROM cache WHERE k = ?');
+        $st->execute([$key]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $row = null;
+    }
+
+    if ($row) {
+        $exp = (int) $row['exp'];
+        if ($exp === 0 || $exp >= $now) {            // fresh (or immutable) -> serve it
+            $d = json_decode($row['v'], true);
+            if ($d !== null || $row['v'] === 'null') {
+                return $d;
+            }
+        } else {
+            // Stale. Atomically claim the single-flight refresh: `exp < now` in the
+            // WHERE means only the first concurrent claimer flips the row; the others
+            // get rowCount 0 and serve the stale value below (no producer call). The
+            // brief grace window covers the recompute so they never see it re-expire.
+            $claimed = false;
+            try {
+                $grace = $now + ($ttl > 0 ? min($ttl, 8) : 8);
+                $u = $db->prepare('UPDATE cache SET exp = ? WHERE k = ? AND exp != 0 AND exp < ?');
+                $u->execute([$grace, $key, $now]);
+                $claimed = $u->rowCount() > 0;
+            } catch (Throwable $e) {
+                $claimed = false;                    // lock contention -> serve stale below
+            }
+            if (!$claimed) {
+                $d = json_decode($row['v'], true);
+                if ($d !== null || $row['v'] === 'null') {
+                    return $d;                        // a sibling is refreshing; serve stale
+                }
+            }
+            // claimed (or the stale value is unusable) -> fall through and recompute
         }
     }
+
     $value = $producer();
     if ($value !== null) {
         cache_set($key, json_encode($value, JSON_UNESCAPED_SLASHES), $ttl);

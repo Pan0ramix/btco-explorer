@@ -29,14 +29,14 @@ function lx_blockindex_retain(): int
 
 function lx_blockindex_pdo(bool $create = false): ?PDO
 {
-    static $pdo = false;
-    if ($pdo !== false) {
+    static $pdo = null;            // memoize only a real handle; a null return re-attempts next call
+    if ($pdo instanceof PDO) {     // so a worker started before the DB was created self-heals once it exists
         return $pdo;
     }
     $cache = lx_config()['cache_db'] ?? null;
     $path = $cache ? dirname($cache) . '/blockindex.sqlite' : null;
     if (!$path || (!$create && !is_file($path))) {
-        return $pdo = null;
+        return null;
     }
     try {
         if ($create && !is_dir(dirname($path))) {
@@ -50,15 +50,17 @@ function lx_blockindex_pdo(bool $create = false): ?PDO
             . 'net TEXT NOT NULL, height INTEGER NOT NULL, time INTEGER NOT NULL, '
             . 'total_fee INTEGER NOT NULL DEFAULT 0, subsidy INTEGER NOT NULL DEFAULT 0, '
             . 'txs INTEGER NOT NULL DEFAULT 0, size INTEGER NOT NULL DEFAULT 0, weight INTEGER NOT NULL DEFAULT 0, '
+            . 'out_value INTEGER NOT NULL DEFAULT 0, '
             . 'p10 REAL NOT NULL DEFAULT 0, p25 REAL NOT NULL DEFAULT 0, p50 REAL NOT NULL DEFAULT 0, '
             . 'p75 REAL NOT NULL DEFAULT 0, p90 REAL NOT NULL DEFAULT 0, '
             . 'pool TEXT NOT NULL DEFAULT \'\', hash TEXT NOT NULL DEFAULT \'\', PRIMARY KEY (net, height))');
         $db->exec('CREATE INDEX IF NOT EXISTS bi_net_time ON block_index (net, time)');
-        // Idempotent migration for indexes created before the hash column (reorg guard) existed.
+        // Idempotent migrations for columns added after the table's first ship.
         try { $db->exec("ALTER TABLE block_index ADD COLUMN hash TEXT NOT NULL DEFAULT ''"); } catch (Throwable $e) {}
+        try { $db->exec('ALTER TABLE block_index ADD COLUMN out_value INTEGER NOT NULL DEFAULT 0'); } catch (Throwable $e) {}
         return $pdo = $db;
     } catch (Throwable $e) {
-        return $pdo = null;
+        return null;
     }
 }
 
@@ -80,11 +82,11 @@ function lx_blockindex_put(PDO $db, array $net, int $height, ?string $hash = nul
     $p = $bs['feerate_pcts'] ?? [0, 0, 0, 0, 0];
     $pool = lx_block_pool($net, $hash);
     try {
-        $db->prepare('INSERT OR REPLACE INTO block_index (net,height,time,total_fee,subsidy,txs,size,weight,p10,p25,p50,p75,p90,pool,hash) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        $db->prepare('INSERT OR REPLACE INTO block_index (net,height,time,total_fee,subsidy,txs,size,weight,out_value,p10,p25,p50,p75,p90,pool,hash) '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
            ->execute([$net['slug'], $height, (int) ($bs['time'] ?? 0), (int) ($bs['total_fee'] ?? 0),
                       (int) ($bs['subsidy'] ?? 0), (int) ($bs['txs'] ?? 0), (int) ($bs['size'] ?? 0),
-                      (int) ($bs['weight'] ?? 0), (float) ($p[0] ?? 0), (float) ($p[1] ?? 0),
+                      (int) ($bs['weight'] ?? 0), (int) ($bs['out_value'] ?? 0), (float) ($p[0] ?? 0), (float) ($p[1] ?? 0),
                       (float) ($p[2] ?? 0), (float) ($p[3] ?? 0), (float) ($p[4] ?? 0),
                       (string) ($pool['label'] ?? ''), (string) $hash]);
         return true;
@@ -220,7 +222,7 @@ function lx_blockindex_series(array $net, string $period, int $maxPoints = 240):
     for ($i = 0; $i < $n; $i += $bucket) {
         $chunk = array_slice($rows, $i, $bucket);
         $c = count($chunk);
-        $sum = ['h' => 0, 't' => 0, 'fee' => 0, 'rew' => 0, 'txs' => 0, 'sz' => 0, 'wt' => 0,
+        $sum = ['h' => 0, 't' => 0, 'fee' => 0, 'rew' => 0, 'txs' => 0, 'sz' => 0, 'wt' => 0, 'out' => 0,
                 'p10' => 0, 'p25' => 0, 'p50' => 0, 'p75' => 0, 'p90' => 0];
         foreach ($chunk as $b) {
             $sum['h']   += (int) $b['height'];
@@ -230,6 +232,7 @@ function lx_blockindex_series(array $net, string $period, int $maxPoints = 240):
             $sum['txs'] += (int) $b['txs'];
             $sum['sz']  += (int) $b['size'];
             $sum['wt']  += (int) $b['weight'];
+            $sum['out'] += (int) $b['out_value'];
             $sum['p10'] += (float) $b['p10']; $sum['p25'] += (float) $b['p25']; $sum['p50'] += (float) $b['p50'];
             $sum['p75'] += (float) $b['p75']; $sum['p90'] += (float) $b['p90'];
         }
@@ -241,9 +244,77 @@ function lx_blockindex_series(array $net, string $period, int $maxPoints = 240):
             'avgTxs'     => $sum['txs'] / $c,
             'avgSize'    => $sum['sz'] / $c,
             'avgWeight'  => $sum['wt'] / $c,
+            'avgOut'     => $sum['out'] / $c,
             'p10' => $sum['p10'] / $c, 'p25' => $sum['p25'] / $c, 'p50' => $sum['p50'] / $c,
             'p75' => $sum['p75'] / $c, 'p90' => $sum['p90'] / $c,
         ];
     }
     return $out;
+}
+
+/**
+ * Per-day pool block-share series over the whole index, for the pool-dominance stacked chart.
+ * Returns ['rows' => [['ts'=>unix_day, '<pool>'=>share%, ...], ...] oldest-first, 'pools' => [top pools..., 'Other']].
+ * The top-$topN pools by total blocks are kept; every other miner folds into 'Other'. Shares are
+ * percentages summing to ~100 per day. Reads block_index directly (no PHP-side full-table load).
+ */
+function lx_pool_share_series(array $net, int $topN = 6, int $maxPoints = 240): array
+{
+    $topN = max(1, min(8, $topN));
+    $maxPoints = max(24, min(1000, $maxPoints));
+    // Cache: two full-index GROUP BY scans are far too heavy to run on the request path per block.
+    // Key on the DAY, not the index extent - the extent changes every ~2.5 min, which would bust
+    // this cache and pay both full-index scans on the first /charts hit after every block. This
+    // chart is day-bucketed history, so a stable daily key plus the 1h TTL (hourly refresh) is
+    // ample freshness while capping the heavy scan to a few times a day.
+    $tag = (string) intdiv(time(), 86400);
+    return cache_remember('poolshare:' . $net['slug'] . ':' . $topN . ':' . $maxPoints . ':' . $tag, 3600, function () use ($net, $topN, $maxPoints) {
+        $db = lx_blockindex_pdo(false);
+        if (!$db) { return ['rows' => [], 'pools' => []]; }
+        try {
+            $t = $db->prepare("SELECT pool, COUNT(*) c FROM block_index WHERE net = ? AND pool != '' GROUP BY pool ORDER BY c DESC LIMIT ?");
+            $t->bindValue(1, $net['slug']);
+            $t->bindValue(2, $topN, PDO::PARAM_INT);
+            $t->execute();
+            $top = array_map('strval', array_column($t->fetchAll(PDO::FETCH_ASSOC), 'pool'));
+            if (!$top) { return ['rows' => [], 'pools' => []]; }
+            $topSet = array_flip($top);
+            $st = $db->prepare('SELECT (time / 86400) AS day, pool, COUNT(*) c FROM block_index WHERE net = ? GROUP BY day, pool ORDER BY day ASC');
+            $st->execute([$net['slug']]);
+            $byDay = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $day = (int) $r['day'];
+                if (!isset($byDay[$day])) {
+                    $byDay[$day] = ['ts' => $day * 86400, '_tot' => 0, 'Other' => 0];
+                    foreach ($top as $p) { $byDay[$day][$p] = 0; }
+                }
+                $c = (int) $r['c'];
+                $byDay[$day]['_tot'] += $c;
+                $key = isset($topSet[(string) $r['pool']]) ? (string) $r['pool'] : 'Other';
+                $byDay[$day][$key] += $c;
+            }
+            // Downsample days into <= maxPoints buckets, summing RAW COUNTS before computing shares
+            // (so percentages stay correct across the bucket), then emit one point per bucket.
+            $days = array_values($byDay);
+            $n = count($days);
+            $bs = max(1, (int) ceil($n / $maxPoints));
+            $rows = [];
+            for ($i = 0; $i < $n; $i += $bs) {
+                $tot = 0; $acc = ['Other' => 0]; foreach ($top as $p) { $acc[$p] = 0; }
+                $ts = $days[$i]['ts'];
+                for ($j = $i; $j < $i + $bs && $j < $n; $j++) {
+                    $tot += $days[$j]['_tot']; $acc['Other'] += $days[$j]['Other'];
+                    foreach ($top as $p) { $acc[$p] += $days[$j][$p]; }
+                }
+                $tot = max(1, $tot);
+                $row = ['ts' => $ts];
+                foreach ($top as $p) { $row[$p] = $acc[$p] / $tot * 100.0; }
+                $row['Other'] = $acc['Other'] / $tot * 100.0;
+                $rows[] = $row;
+            }
+            return ['rows' => $rows, 'pools' => array_merge($top, ['Other'])];
+        } catch (Throwable $e) {
+            return ['rows' => [], 'pools' => []];
+        }
+    });
 }

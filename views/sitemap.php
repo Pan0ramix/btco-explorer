@@ -11,7 +11,7 @@ $base = lx_base_url();
 $urls = [$base . '/', $base . '/docs', $base . '/donate'];
 $net = lx_net_default();
 if ($net) {
-    foreach (['/blocks', '/mempool', '/mining', '/charts', '/node', '/tools'] as $p) {
+    foreach (['/blocks', '/mempool', '/mining', '/charts', '/richlist', '/halving', '/node', '/tools'] as $p) {
         $urls[] = $base . $p;
     }
     if (lx_mweb_enabled($net)) {

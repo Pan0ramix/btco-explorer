@@ -15,11 +15,27 @@ rpcbind=127.0.0.1
 rpcport=9332
 rpcuser=CHANGE_ME
 rpcpassword=CHANGE_ME
+
+# RPC capacity - the defaults (rpcworkqueue=16, rpcthreads=4) are far too shallow for a busy
+# explorer, ESPECIALLY while a full-chain index/backfill runs alongside live traffic. When the
+# queue fills, litecoind logs "http work queue depth exceeded" and REJECTS requests (the explorer
+# then 503s / shows degraded cards). Give it a deep queue and more worker threads:
+rpcworkqueue=256
+rpcthreads=16
+rpcservertimeout=60
 ```
 
 `txindex=1` is required. Litecoin Explorer resolves `/tx/:txid` straight from Core, and
 ElectrumX itself declares `txindex` a required daemon index, so keep it on. Let it fully sync
 (a full mainnet chain, past MWEB activation at height 2,265,984) before indexing.
+
+**"http work queue depth exceeded" in the litecoind log** means the RPC queue above is saturated:
+raise `rpcworkqueue`/`rpcthreads` and restart litecoind. It's usually triggered by a heavy one-time
+walk (block-index backfill, address-activity, or the MWEB index, which fetch per-block `getblock`/
+`getblockstats`) running at the same time as request traffic. Those tools are throttled
+(`--sleep`/`--batch`); run them with a gentle throttle (e.g. `--sleep=400`) or during a quiet
+window, and prefer one at a time. The site's own request path is cache-first (SQLite), so steady
+traffic alone does not fill the queue.
 
 ## 2. The Electrum address index
 
@@ -320,9 +336,12 @@ a drop-in backend.
 ## 5. MWEB peg index (optional)
 
 Out of the box the `/mweb` pages + `/api/mweb/*` are served live from litecoind RPC. That covers
-per-block/tx MWEB, current supply and recent blocks, but deep history (the supply chart, full
-peg-in/peg-out lists) needs an index. It is a **self-contained SQLite index** in `db/`, kept
-fresh by a PHP cron - no extra daemon.
+per-block/tx MWEB, current supply and recent blocks, but deep history (the supply chart, peg-flow,
+the **MWEB activity chart** and output-set/kernel counts, full peg-in/peg-out lists) needs an
+index. It is a **self-contained SQLite index** in `db/`, kept fresh by a PHP cron - no extra
+daemon. The MWEB-internal counts (per-block kernels = confidential tx count, and the cumulative
+output set) are captured **best-effort** from `getblock` verbosity 2's `.mweb` object; on a node
+build that doesn't serve it they stay blank while peg data (from the HogEx) is unaffected.
 
 Build it once on a machine that has an [mwebscan](https://mwebscan.com) analytics DB, then ship
 the tiny result, exactly like the Electrum index:
@@ -383,6 +402,76 @@ WantedBy=timers.target
 `systemctl enable --now litecoinexplorer-snapshot.timer` - or the crontab equivalent
 `*/5 * * * * www-data php /var/www/litecoinexplorer.org/tools/snapshot.php >/dev/null 2>&1`.
 Without it the mining mempool/fee-history charts stay empty (everything else works).
+
+### Full-chain history backfill (one-time)
+
+The snapshot cron trickles the block-economics index in a few blocks per run and, by default,
+retains a rolling window (`blockindex_retain`). To power **full-history** charts, set
+`'blockindex_retain' => 0` in `config.php` (keep the whole chain, never prune) and run the
+one-time backfill so all of history populates at once instead of over weeks of cron runs:
+
+```bash
+# genesis -> tip: throttled, resumable, gap-filling. Safe alongside the live site; Ctrl-C / re-run any time.
+sudo -u www-data php /var/www/litecoinexplorer.org/tools/backfill-index.php
+
+# gentler on a busy node, or fill a specific range, or just size the job first:
+php tools/backfill-index.php --batch=100 --sleep=500
+php tools/backfill-index.php --from=0 --to=1000000
+php tools/backfill-index.php --dry-run
+```
+
+Needs a **non-pruned** node (`getblockstats` reads block data). The full LTC chain (~3M blocks)
+adds roughly 350-400 MB to the index DB. Run it as the same user as php-fpm so it can write `db/`.
+
+### Rich list (periodic UTXO-set snapshot)
+
+The `/richlist` page (top holders + wealth distribution + Gini) is built offline from a full
+UTXO-set dump - never per request. It needs a **non-pruned, co-located** node (the parser reads
+the dump file directly). Run it daily or every few hours:
+
+```bash
+# 1) dump the UTXO set (locks cs_main for a few minutes; writes a multi-GB file)
+litecoin-cli dumptxoutset /var/lib/litecoind/utxo.dat
+
+# 2) parse + aggregate -> top holders + distribution (cross-checks against electrum before publishing)
+sudo -u www-data php /var/www/litecoinexplorer.org/tools/richlist.php /var/lib/litecoind/utxo.dat --verify=25
+
+# 3) remove the dump
+rm -f /var/lib/litecoind/utxo.dat
+```
+
+`--verify=N` samples N top addresses against electrum and **refuses to publish** if the parsed
+balances disagree (a guard against any dump-format drift). Aggregation is streamed to a disposable
+scratch DB, so memory stays bounded; the persisted `rich_list` + `wealth_summary` are a few MB.
+Balances are per-address (not per-entity) and MWEB coins are excluded (shielded) - both stated on
+the page. Verify the parser once with `php tools/richlist.php --selftest`.
+
+### Address-activity index (active addresses, CDD, median value, new addresses, HODL waves)
+
+The `/charts` **Network activity** + **Coin age** sections (active addresses/day, coin-days-
+destroyed, tx/day, new addresses/day, median & p10/p90 tx value, and the HODL-wave supply-by-coin-
+age bars) are built by a one-time full-chain walk that maintains a UTXO map to resolve every input's
+value, age and address - metrics the block-economics index can't derive. It needs a **non-pruned**
+node. It also keeps a `seen_addr` table (every address ever seen, for new-addresses/day), so budget
+disk for that plus the UTXO map.
+
+```bash
+# one-time: walk genesis -> tip (resumable; safe to Ctrl-C and re-run, throttled for the node)
+sudo -u www-data php /var/www/litecoinexplorer.org/tools/addr-activity.php --batch=200 --sleep=200
+# then keep it current from cron (daily is plenty; it resumes at the last complete day)
+php tools/addr-activity.php            # incremental catch-up
+php tools/addr-activity.php --reset    # rebuild from scratch
+php tools/addr-activity.php --selftest # verify the CDD + active-set math, no node needed
+```
+
+The walk is **resumable at day granularity**: each UTC day is one transaction covering its UTXO
+mutations + result row + progress marker, committed only once a later day proves it complete, so an
+interruption never tears a day or double-applies a spend. The current (incomplete) day is held back
+until it closes. It writes `db/activity.sqlite` (the persisted daily rows plus the working UTXO map,
+which is kept so cron runs stay incremental). The full walk is the heaviest one-time job here - it
+fetches every block (`getblock` verbosity 2, falling back to verbosity 1 + batched
+`getrawtransaction`); expect it to run for a while and use a few GB for the UTXO map at peak. Counts
+are per-address (not per-entity) and MWEB (shielded) activity is excluded - both stated on the page.
 
 ### The audit tick (every ~30s)
 

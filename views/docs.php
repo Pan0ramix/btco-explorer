@@ -79,6 +79,16 @@ $groups = [
         ['GET', '/v1/mining/difficulty-adjustments/:interval', 'Difficulty-adjustment history (1m|3m|6m|1y|all)'],
         ['GET', '/v1/block/:hash/audit-summary', 'Template-vs-mined block audit + health'],
     ],
+    'Charts & analytics' => [
+        ['GET', '/v1/statistics', 'Network summary snapshot'],
+        ['GET', '/v1/activity[/:period]', 'Active addresses, coin-days-destroyed, tx/day, new addresses, median tx value'],
+        ['GET', '/v1/coin-age', 'HODL waves (supply by coin age) + realized cap / realized price'],
+        ['GET', '/v1/blocks-economics/:period', 'Per-block fees / reward / size / weight / value-sent / fee percentiles, bucketed'],
+        ['GET', '/v1/richlist[/:limit]', 'Wealth summary (supply, Gini, bands) + top holders'],
+        ['GET', '/v1/halving', 'Halving countdown: blocks left, next reward, estimated date'],
+        ['GET', '/v1/prices', 'Current price in the configured currencies'],
+        ['GET', '/charts/export?metric=blocks|activity|difficulty|price|mempool|pools[&period=]', 'CSV download of a chart series'],
+    ],
     'MWEB' => [
         ['GET', '/mweb/tip', 'Current MWEB HogEx tip'],
         ['GET', '/mweb/blocks[?from=&to=]', 'MWEB blocks in a height range'],
@@ -86,6 +96,7 @@ $groups = [
         ['GET', '/mweb/pegins[?before=&limit=]', 'Peg-in history (keyset paged)'],
         ['GET', '/mweb/pegouts[?before=&limit=]', 'Peg-out history (keyset paged)'],
         ['GET', '/mweb/supply[?limit=]', 'MWEB supply series'],
+        ['GET', '/mweb/activity[?limit=]', 'MWEB internal activity: kernels (tx count) + outputs added per day'],
         ['GET', '/mweb/clusters[?limit=]', 'Reused peg-out destination addresses'],
     ],
 ];
@@ -96,6 +107,7 @@ $groupIcons = [
     'Addresses' => 'at-sign',
     'Mempool & fees' => 'activity',
     'Mining' => 'cpu',
+    'Charts & analytics' => 'trending-up',
     'MWEB' => 'shield',
 ];
 ?>

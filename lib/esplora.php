@@ -21,14 +21,14 @@ function lx_tip_height(array $net): int
     // static memo here: ws-server.php is a long-running daemon, so a static would freeze the tip
     // for the whole process and break new-block detection.
     return cache_remember('tiph:' . $net['slug'], 5, function () use ($net) {
-        return (int) lx_rpc($net, 'getblockcount');
+        return (int) lx_rpc($net, 'getblockcount', [], 5);   // short timeout: fail fast, don't park a worker 25s
     });
 }
 
 function lx_tip_hash(array $net): string
 {
     return cache_remember('tiphash:' . $net['slug'], 5, function () use ($net) {
-        return (string) lx_rpc($net, 'getbestblockhash');
+        return (string) lx_rpc($net, 'getbestblockhash', [], 5);   // short timeout: fail fast
     });
 }
 
@@ -43,7 +43,7 @@ function lx_block_hash_at(array $net, int $height): ?string
     if ($hit !== null) {
         return $hit;
     }
-    $hash = lx_rpc_soft($net, 'getblockhash', [$height]);
+    $hash = lx_rpc_soft($net, 'getblockhash', [$height], 5);   // short timeout: hot path, fail fast
     if (!is_string($hash)) {
         return null;
     }
@@ -114,19 +114,26 @@ function lx_block_time_at(array $net, string $hash): ?int
     return (int) $hdr['time'];
 }
 
-/** Map an electrs listunspent row to an Esplora utxo (with confirmed block info). */
+/**
+ * Map an electrs listunspent row to an Esplora utxo (with confirmed block info). Reads ONLY the
+ * warm h2h/btime caches - never a per-row getblockhash/getblockheader RPC. The caller
+ * (lx_scripthash_utxos) batch-warms those caches first, so a hot-wallet address with thousands of
+ * UTXOs costs a couple of batched round-trips instead of two serial RPCs per UTXO. When a height's
+ * block info wasn't warmed (deadline), the essential txid/vout/value/height is still returned and
+ * only the optional block_hash/block_time enrichment is dropped.
+ */
 function lx_map_utxo_row(array $net, array $u): array
 {
     $height = (int) ($u['height'] ?? 0);
     $status = ['confirmed' => $height > 0];
     if ($height > 0) {
         $status['block_height'] = $height;
-        $bh = lx_block_hash_at($net, $height);
+        $bh = cache_get('h2h:' . $net['slug'] . ':' . $height);
         if ($bh !== null) {
             $status['block_hash'] = $bh;
-            $bt = lx_block_time_at($net, $bh);
+            $bt = cache_get('btime:' . $net['slug'] . ':' . $bh);
             if ($bt !== null) {
-                $status['block_time'] = $bt;
+                $status['block_time'] = (int) $bt;
             }
         }
     }
@@ -167,14 +174,20 @@ function lx_map_spk_type(string $coreType): string
 /** Map a Core scriptPubKey (+value) into an Esplora vin.prevout / vout entry. */
 function lx_map_spk(array $spk, $value): array
 {
-    $addr = $spk['address'] ?? ($spk['addresses'][0] ?? null);
+    // Only a SINGLE-address script carries scriptpubkey_address. Litecoin Core 0.21 reports the
+    // `addresses` array; a bare multisig / non-standard script has >1 entry, which Esplora omits
+    // entirely rather than attributing the output to just the first cosigner.
+    $addr = $spk['address'] ?? null;
+    if ($addr === null && isset($spk['addresses']) && is_array($spk['addresses']) && count($spk['addresses']) === 1) {
+        $addr = $spk['addresses'][0];
+    }
     $out = [
         'scriptpubkey'      => $spk['hex'] ?? '',
         'scriptpubkey_asm'  => $spk['asm'] ?? '',
         'scriptpubkey_type' => lx_map_spk_type($spk['type'] ?? 'nonstandard'),
     ];
-    // Esplora omits scriptpubkey_address entirely when the script has no
-    // decodable address (op_return, bare multisig, p2pk, ...). Never null.
+    // Esplora omits scriptpubkey_address entirely when the script has no single decodable address
+    // (op_return, bare multisig, p2pk, ...). Never null.
     if ($addr !== null) {
         $out['scriptpubkey_address'] = $addr;
     }
@@ -205,7 +218,7 @@ function lx_get_tx_verbose(array $net, string $txid, ?string $blockhash = null):
 }
 
 /** Resolve any vin prevouts that weren't inlined (no verbosity-2 support). */
-function lx_resolve_prevouts(array $net, array &$vin): void
+function lx_resolve_prevouts(array $net, array &$vin, int $cap = 0): void
 {
     $need = [];           // distinct prev txid -> list of vin indexes
     foreach ($vin as $i => $in) {
@@ -217,7 +230,15 @@ function lx_resolve_prevouts(array $net, array &$vin): void
     if (!$need) {
         return;
     }
+    // Optional cap ($cap > 0) for the UNTRUSTED /decode lane only: an unauthenticated /decode of a
+    // ~2 MB tx can carry tens of thousands of distinct fabricated input txids, and resolving them
+    // all would fan one request into that many getrawtransaction lookups. Confirmed on-chain txs
+    // (/tx, /block) pass no cap and resolve fully - a real tx is consensus-bounded (~1,400 inputs),
+    // and capping them would understate the fee to 0 on a money page. Capped inputs keep prevout=null.
     $txids = array_keys($need);
+    if ($cap > 0 && count($txids) > $cap) {
+        $txids = array_slice($txids, 0, $cap);
+    }
     $calls = [];
     foreach ($txids as $tid) {
         $calls[] = ['getrawtransaction', [$tid, true]];
@@ -244,7 +265,7 @@ function lx_resolve_prevouts(array $net, array &$vin): void
  * (and fee possibly 0) so a caller can resolve prevouts for many txs in ONE batch
  * via lx_resolve_prevouts_multi(). The single-tx path leaves it false.
  */
-function lx_map_tx(array $net, array $t, bool $deferPrevouts = false): array
+function lx_map_tx(array $net, array $t, bool $deferPrevouts = false, int $prevoutCap = 0): array
 {
     $coinbaseTx = false;
     $vin = [];
@@ -283,7 +304,7 @@ function lx_map_tx(array $net, array $t, bool $deferPrevouts = false): array
     $vin = array_values($vin);
 
     if (!$deferPrevouts) {
-        lx_resolve_prevouts($net, $vin);
+        lx_resolve_prevouts($net, $vin, $prevoutCap);
     }
 
     $vout = [];
@@ -351,7 +372,7 @@ function lx_map_tx(array $net, array $t, bool $deferPrevouts = false): array
  * poisons the cache with a transient null height or an unresolved-prevout fee.
  * Shared by the single-tx and batched builders so the gate can never drift.
  */
-function lx_cache_tx_if_confirmed(array $net, string $txid, array $tx): void
+function lx_cache_tx_if_confirmed(array $net, string $txid, array $tx, bool $verifyCanonical = false): void
 {
     if (empty($tx['status']['confirmed']) || $tx['status']['block_height'] === null) {
         return;
@@ -361,7 +382,19 @@ function lx_cache_tx_if_confirmed(array $net, string $txid, array $tx): void
             return;   // fee unreliable
         }
     }
-    $depth = lx_tip_height($net) - (int) $tx['status']['block_height'];
+    $height = (int) $tx['status']['block_height'];
+    // Canonical-block check ONLY on the hinted path. /block/{hash}/txs fetches with a blockhash hint,
+    // so an orphan/stale hash can end up in status.block_hash; caching that under the txid-only key
+    // would poison /tx/{txid}. A NON-hinted fetch (single /tx, address walk) gets the tx in its
+    // canonical block from Core, so block_hash is already canonical - no check (and no per-tx
+    // getblockhash) needed, which keeps the cold address-walk from fanning out serial RPCs.
+    if ($verifyCanonical && isset($tx['status']['block_hash'])) {
+        $canon = lx_block_hash_at($net, $height);
+        if ($canon !== null && $tx['status']['block_hash'] !== $canon) {
+            return;
+        }
+    }
+    $depth = lx_tip_height($net) - $height;
     // Cap even deep confirmations at 1 day rather than forever: this cache is
     // keyed by TXID (not block hash), so a deep reorg that moves a tx to a
     // different block would otherwise be pinned permanently. A finite TTL
@@ -385,7 +418,7 @@ function lx_esplora_tx(array $net, string $txid, ?string $blockhash = null): ?ar
         return null;
     }
     $tx = lx_map_tx($net, $vtx);
-    lx_cache_tx_if_confirmed($net, $txid, $tx);
+    lx_cache_tx_if_confirmed($net, $txid, $tx, $blockhash !== null);   // verify canonical only when a hint was used
     return $tx;
 }
 
@@ -465,9 +498,11 @@ function lx_esplora_txs(array $net, array $txids, ?string $blockhash = null): ar
     // 3) Resolve every deferred prevout in ONE batch + finalize fees.
     lx_resolve_prevouts_multi($net, $mapped);
 
-    // 4) Cache confirmed bodies and merge into the output map.
+    // 4) Cache confirmed bodies and merge into the output map. Verify canonical only when this
+    //    batch was fetched with a blockhash hint (the /block/{hash}/txs path); a hintless batch
+    //    (address walk) gets canonical blocks from Core, so it skips the per-tx getblockhash.
     foreach ($mapped as $tid => $tx) {
-        lx_cache_tx_if_confirmed($net, $tid, $tx);
+        lx_cache_tx_if_confirmed($net, $tid, $tx, $blockhash !== null);
         $out[$tid] = $tx;
     }
     return $out;
@@ -932,13 +967,15 @@ function lx_stats_for_scripthash(array $net, string $sh, callable $match, string
         $mem2['funded_txo_count']  = count($mem);
     } else {
         $deadline = time() + 6; // wall-clock budget, never pin a worker
+        $truncated = false;     // set if the walk runs out of budget (sums would be partial)
         // Batch the resolution in chunks of 25 (via lx_esplora_txs) so a cold page
         // is a handful of round-trips, not ~500 serial getrawtransaction calls that
         // would pin an FPM worker and let an attacker amplify a single GET into
         // hundreds of RPCs. Confirmed bodies are cached, so warm walks are cheap.
-        $walk = function (array $txids, array &$bucket) use ($net, $match, $cap, $deadline) {
+        $walk = function (array $txids, array &$bucket) use ($net, $match, $cap, $deadline, &$truncated) {
             foreach (array_chunk(array_slice($txids, 0, $cap), 25) as $chunk) {
                 if (time() > $deadline) {
+                    $truncated = true;
                     break;
                 }
                 $map = lx_esplora_txs($net, $chunk);
@@ -965,6 +1002,27 @@ function lx_stats_for_scripthash(array $net, string $sh, callable $match, string
         };
         $walk($conf, $chain);
         $walk($mem, $mem2);
+        if ($truncated) {
+            // The per-tx walk ran out of its wall-clock budget, so the funded/spent SUMS are
+            // partial. Never present a partial (understated) balance as complete on a money page:
+            // fall back to electrs' EXACT balance (as the >walk_limit branch does) - funded = net
+            // balance, spent = 0, so funded - spent is exact - keeping only the tx counts. If
+            // electrs is unreachable, degrade to 503 rather than cache a wrong sum.
+            try {
+                $bal = lx_electrum($net)->request('blockchain.scripthash.get_balance', [$sh]);
+            } catch (Throwable $e) {
+                $bal = null;
+            }
+            if (!is_array($bal)) {
+                return null;
+            }
+            $chain = $empty; $chain['tx_count'] = count($conf);
+            $chain['funded_txo_sum']   = max(0, (int) ($bal['confirmed'] ?? 0));
+            $chain['funded_txo_count'] = count($conf);
+            $mem2 = $empty; $mem2['tx_count'] = count($mem);
+            $mem2['funded_txo_sum']    = max(0, (int) ($bal['unconfirmed'] ?? 0));
+            $mem2['funded_txo_count']  = count($mem);
+        }
     }
 
     $result = [$keyName => $keyVal, 'chain_stats' => $chain, 'mempool_stats' => $mem2];
@@ -1127,8 +1185,11 @@ function lx_esplora_mempool(array $net): array
 
 function lx_mempool_txids(array $net): array
 {
-    $r = lx_rpc_soft($net, 'getrawmempool', [false]);
-    return is_array($r) ? array_values($r) : [];
+    // 3s server cache so a polling client (WS or /api) can't drive one getrawmempool per request.
+    return cache_remember('memtxids:' . $net['slug'], 3, function () use ($net) {
+        $r = lx_rpc_soft($net, 'getrawmempool', [false]);
+        return is_array($r) ? array_values($r) : [];
+    });
 }
 
 /** Esplora /mempool/recent: up to 10 entries with output-value sums. */
@@ -1340,8 +1401,9 @@ function lx_decode_rawtx(array $net, string $hex): ?array
         return null;
     }
     // lx_map_tx resolves prevouts (if the referenced outputs exist) and the fee;
-    // there's no blockhash, so status is unconfirmed.
-    return lx_map_tx($net, $dec);
+    // there's no blockhash, so status is unconfirmed. Cap prevout resolution at 500 here (and ONLY
+    // here): this is the untrusted lane where arbitrary hex can carry tens of thousands of inputs.
+    return lx_map_tx($net, $dec, false, 500);
 }
 
 // ---- no-txindex fallbacks -------------------------------------------------
@@ -1404,6 +1466,10 @@ function lx_scripthash_history(array $net, string $sh): ?array
     // Returns NULL when electrs is unreachable/erroring (index down or mid-resync) so
     // callers show a degraded state instead of a false, confident "0 balance". An empty
     // array is a genuinely unused address.
+    if (!lx_address_index_fresh($net)) {
+        return null;   // electrs measurably behind the chain (mid-reindex/resync): a legitimately
+                       // empty [] here would be a FALSE-EMPTY, so 503 instead of "no funds".
+    }
     $cached = cache_remember('shist:' . $net['slug'] . ':' . $sh, 8, function () use ($net, $sh) {
         try {
             $h = lx_electrum($net)->request('blockchain.scripthash.get_history', [$sh]);
@@ -1426,6 +1492,65 @@ function lx_electrum_reachable(array $net): bool
             return false;
         }
     });
+}
+
+/**
+ * Index-freshness guard for the address/scripthash lanes.
+ *
+ * electrs can be UP (listunspent/get_history answering fine) yet have its index
+ * BEHIND the chain tip - mid-reindex, or catching up after downtime. In that state
+ * it returns a legitimately-empty [] for a funded address: a FALSE-EMPTY 200 that a
+ * wallet/deposit-watcher reads as "no funds yet" and stalls on. The electrs-down ->
+ * null -> 503 path does NOT cover this (electrs is answering).
+ *
+ * Returns false ONLY when we can CONFIDENTLY see electrs is more than N blocks behind
+ * the node (N = index_lag_tolerance, default 3: absorbs the block or two of normal
+ * node-ahead-of-index skew without masking a real resync, which is behind by tens to
+ * thousands of blocks). FAILS OPEN (true) on any uncertainty - a hard electrs failure
+ * is already handled downstream by get_history/listunspent null -> 503, and a merely
+ * slow/down node RPC must not manufacture a NEW false-503.
+ *
+ * Cheap by construction: the VERDICT is cached 10s (single-flight), and it first
+ * short-circuits on the already-cached reachability probe so a down/hung electrs is
+ * never re-probed here. The live tip probe uses a dedicated SHORT-timeout, no-retry
+ * client (not the shared one, whose reconnect+renegotiate can park ~2x timeout), and
+ * the node tip reuses lx_tip_height's 5s cache. Net: at most one short probe per
+ * network per ~10s, never one per request.
+ */
+function lx_address_index_fresh(array $net): bool
+{
+    $tol = (int) (lx_config()['index_lag_tolerance'] ?? 3);
+    $verdict = cache_remember('idxfresh:' . $net['slug'], 10, function () use ($net, $tol) {
+        // A down/hung electrs is already known + cached by the reachability probe
+        // (server.ping, 10s TTL): do ZERO new electrs work, just fail open. The
+        // downstream get_history/listunspent null -> 503 still covers the outage.
+        if (!lx_electrum_reachable($net)) {
+            return true;
+        }
+        try {
+            // Dedicated SHORT-timeout, no-retry probe - fail-fast like lx_tip_height,
+            // so even a partial hang (pings ok, stalls on headers.subscribe) is bounded.
+            $cfg = $net['electrum'];
+            $cfg['timeout'] = min(3, (int) ($cfg['timeout'] ?? 8));
+            $cfg['retries'] = 0;
+            $hdr = (new TsElectrum($cfg))->request('blockchain.headers.subscribe');
+            $eh  = is_array($hdr) ? (int) ($hdr['height'] ?? 0) : 0;
+            if ($eh <= 0) {
+                return true;   // can't read electrs tip -> fail open
+            }
+            // Node tip (lx_tip_height, cached 5s). It THROWS on Core-RPC failure - it
+            // never returns 0 - so it MUST stay inside this try, or a slow node would
+            // propagate and manufacture a false-503. Any throw here -> fail open.
+            $nh = lx_tip_height($net);
+            if ($nh <= 0) {
+                return true;
+            }
+            return ($nh - $eh) <= $tol;
+        } catch (Throwable $e) {
+            return true;   // electrs or node probe failed -> fail open; a real outage 503s downstream
+        }
+    });
+    return $verdict !== false;   // only an explicit, cached "behind" verdict blocks; anything else = fresh
 }
 
 function lx_scripthash_stats(array $net, string $sh): ?array
@@ -1495,6 +1620,10 @@ function lx_scripthash_utxos(array $net, string $sh): ?array
     // serving a long-stale set. No history fingerprint (that would double the
     // electrs round-trips just to guard a cheap listunspent). NULL when electrs is
     // unavailable so callers 503 rather than report a false "no coins".
+    if (!lx_address_index_fresh($net)) {
+        return null;   // stale/lagging index -> a false-empty UTXO set; 503 like the electrs-down path
+    }
+    try {   // the batch-warm below (lx_block_hashes / lx_rpc_batch) can throw on a node blip
     $cached = cache_remember('autxo:' . $net['slug'] . ':' . $sh, 10, function () use ($net, $sh) {
         try {
             $utxos = lx_electrum($net)->request('blockchain.scripthash.listunspent', [$sh]);
@@ -1504,12 +1633,43 @@ function lx_scripthash_utxos(array $net, string $sh): ?array
         if (!is_array($utxos)) {
             return null;   // transient electrs error: don't cache, don't poison
         }
+        // Batch-warm the block caches in bounded chunks (with a wall-clock deadline) so the per-row
+        // mapping below hits only warm caches - never two serial RPCs per UTXO. This defuses the
+        // unauthenticated walk-amplification a hot-wallet /utxo request would otherwise cause. The
+        // UTXO set is always returned COMPLETE; only the optional block_hash/time may be dropped if
+        // the deadline is reached on a pathologically large set.
+        $slug = $net['slug'];
+        $heights = [];
+        foreach ($utxos as $u) { $h = (int) ($u['height'] ?? 0); if ($h > 0) { $heights[$h] = true; } }
+        $deadline = microtime(true) + 6.0;
+        $warmHashes = [];
+        foreach (array_chunk(array_keys($heights), 100) as $chunk) {
+            foreach (lx_block_hashes($net, $chunk) as $hh) { $warmHashes[$hh] = true; }   // warms h2h
+            if (microtime(true) > $deadline) { break; }
+        }
+        $needTime = [];
+        foreach (array_keys($warmHashes) as $hash) {
+            if (cache_get('btime:' . $slug . ':' . $hash) === null) { $needTime[] = $hash; }
+        }
+        foreach (array_chunk($needTime, 100) as $chunk) {
+            if (microtime(true) > $deadline) { break; }
+            $calls = [];
+            foreach ($chunk as $hash) { $calls[] = ['getblockheader', [$hash, true]]; }
+            $res = lx_rpc_batch($net, $calls);   // warms btime
+            foreach ($chunk as $i => $hash) {
+                $hdr = $res[$i] ?? null;
+                if (is_array($hdr) && isset($hdr['time'])) { cache_set('btime:' . $slug . ':' . $hash, (string) $hdr['time'], 0); }
+            }
+        }
         $out = [];
         foreach ($utxos as $u) {
-            $out[] = lx_map_utxo_row($net, $u);
+            $out[] = lx_map_utxo_row($net, $u);   // cache-only, no per-row RPC
         }
         return $out;
     });
+    } catch (\Throwable $e) {
+        return null;   // electrs/node threw mid-request (blip / batch error): unavailable, never a false-empty
+    }
     return is_array($cached) ? $cached : null;
 }
 
@@ -1996,7 +2156,7 @@ function lx_txoutset_refresh(array $net, bool $force = false): ?array
 /** The getblockstats field filter (shared so single + batch paths agree). */
 function lx_blockstats_fields(): array
 {
-    return ['height', 'txs', 'total_size', 'total_weight', 'totalfee', 'subsidy',
+    return ['height', 'txs', 'total_size', 'total_weight', 'totalfee', 'subsidy', 'total_out',
         'feerate_percentiles', 'minfeerate', 'maxfeerate', 'time', 'avgfeerate'];
 }
 
@@ -2018,13 +2178,14 @@ function lx_map_blockstats(array $s, string $hash, ?int $height): array
         'avg_feerate' => (float) ($s['avgfeerate'] ?? 0),
         // p10/p25/p50/p75/p90 sat/vB (drives the fee-rates timeseries + block fee-range).
         'feerate_pcts' => [(float) ($pct[0] ?? 0), (float) ($pct[1] ?? 0), (float) ($pct[2] ?? 0), (float) ($pct[3] ?? 0), (float) ($pct[4] ?? 0)],
+        'out_value'   => (int) ($s['total_out'] ?? 0),   // total sent (excludes coinbase); drives value/velocity charts
         'time'        => (int) ($s['time'] ?? 0),
     ];
 }
 
 function lx_block_stats(array $net, string $hash, ?int $height = null): ?array
 {
-    $ckey = 'bstats2:' . $net['slug'] . ':' . $hash;
+    $ckey = 'bstats3:' . $net['slug'] . ':' . $hash;
     $hit = cache_get($ckey);
     if ($hit !== null) {
         $d = json_decode($hit, true);
@@ -2052,7 +2213,7 @@ function lx_warm_block_stats(array $net, array $heightToHash): void
     $tip = lx_tip_height($net);
     $need = [];
     foreach ($heightToHash as $h => $hash) {
-        if (cache_get('bstats2:' . $net['slug'] . ':' . $hash) === null) { $need[$h] = $hash; }
+        if (cache_get('bstats3:' . $net['slug'] . ':' . $hash) === null) { $need[$h] = $hash; }
     }
     if (!$need) { return; }
     $calls = [];
@@ -2063,7 +2224,7 @@ function lx_warm_block_stats(array $net, array $heightToHash): void
         $s = $res[$i++] ?? null;
         if (is_array($s)) {
             $mapped = lx_map_blockstats($s, $hash, (int) $h);
-            cache_set('bstats2:' . $net['slug'] . ':' . $hash, json_encode($mapped, JSON_UNESCAPED_SLASHES), ($tip - $mapped['height']) > 100 ? 0 : 600);
+            cache_set('bstats3:' . $net['slug'] . ':' . $hash, json_encode($mapped, JSON_UNESCAPED_SLASHES), ($tip - $mapped['height']) > 100 ? 0 : 600);
         }
     }
 }
@@ -2082,7 +2243,7 @@ function lx_recent_block_stats(array $net, int $count = 12): array
     foreach ($heights as $h) {
         if (!isset($hashes[$h])) { break; }
         $hash = $hashes[$h];
-        $c = cache_get('bstats2:' . $net['slug'] . ':' . $hash);
+        $c = cache_get('bstats3:' . $net['slug'] . ':' . $hash);
         if ($c !== null) {
             $d = json_decode($c, true);
             if (is_array($d)) { $stats[$h] = $d; continue; }
@@ -2098,7 +2259,7 @@ function lx_recent_block_stats(array $net, int $count = 12): array
             $s = $res[$i++] ?? null;
             if (is_array($s)) {
                 $mapped = lx_map_blockstats($s, $hash, $h);
-                cache_set('bstats2:' . $net['slug'] . ':' . $hash, json_encode($mapped, JSON_UNESCAPED_SLASHES), ($tip - $mapped['height']) > 100 ? 0 : 600);
+                cache_set('bstats3:' . $net['slug'] . ':' . $hash, json_encode($mapped, JSON_UNESCAPED_SLASHES), ($tip - $mapped['height']) > 100 ? 0 : 600);
                 $stats[$h] = $mapped;
             }
         }
@@ -2659,8 +2820,8 @@ function lx_health(array $net): array
 function lx_decode_script(array $net, string $hex): ?array
 {
     $hex = preg_replace('/\s+/', '', trim($hex));
-    if ($hex === '' || !ctype_xdigit($hex) || strlen($hex) % 2 !== 0) {
-        return null;
+    if ($hex === '' || !ctype_xdigit($hex) || strlen($hex) % 2 !== 0 || strlen($hex) > 200000) {
+        return null;   // cap the blob so an oversized paste can't push a huge decodescript at the node
     }
     $r = lx_rpc_soft($net, 'decodescript', [$hex]);
     return is_array($r) ? $r : null;
@@ -2670,8 +2831,8 @@ function lx_decode_script(array $net, string $hex): ?array
 function lx_decode_psbt(array $net, string $psbt): ?array
 {
     $psbt = trim($psbt);
-    if ($psbt === '') {
-        return null;
+    if ($psbt === '' || strlen($psbt) > 200000) {
+        return null;   // cap the blob before decodepsbt + analyzepsbt
     }
     $decoded = lx_rpc_soft($net, 'decodepsbt', [$psbt]);
     if (!is_array($decoded)) {
@@ -2719,6 +2880,9 @@ function lx_encode_op_return(string $input, bool $isHex): ?array
 /** verifymessage (legacy p2pkh signing only). Returns true/false, or null on bad input. */
 function lx_verify_message(array $net, string $addr, string $sig, string $msg)
 {
+    if (strlen($addr) > 130 || strlen($sig) > 200 || strlen($msg) > 100000) {
+        return null;   // bound each field so oversized input can't be forwarded to the node
+    }
     $r = lx_rpc_soft($net, 'verifymessage', [$addr, $sig, $msg]);
     return is_bool($r) ? $r : null;
 }

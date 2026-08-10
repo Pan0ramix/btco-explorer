@@ -55,6 +55,13 @@ return [
     // {"spent":true}. Raise if legitimate deep spends are missing the spending txid.
     'outspend_walk_limit' => 200,
 
+    // Address-index freshness tolerance (blocks). The /address + /scripthash lanes 503
+    // ("index unavailable") when electrs is more than this many blocks behind the node -
+    // catching a stale/reindexing index that would otherwise return a FALSE-EMPTY [] (a
+    // wallet/deposit-watcher reads [] as "no funds" and stalls). 3 absorbs normal
+    // node-ahead-of-index skew; a real resync is far further behind.
+    'index_lag_tolerance' => 3,
+
     // Live LTC price for fiat values (home ticker + tx/address USD, /api/v1/prices).
     // Fetched SERVER-SIDE (the strict CSP forbids browser calls to third-party
     // APIs) and cached ~60s. Best-effort: if disabled or unreachable, fiat simply
@@ -81,11 +88,13 @@ return [
     // cron step: it indexes up to 'blockindex_per_run' blocks per run (forward-fill new
     // blocks, then backfill history) and retains ~'blockindex_retain' recent blocks
     // (~90 days at 150s spacing). Lower per_run if the node is busy; history just fills
-    // in more slowly. Rows are tiny (per-block stats, no tx lists), so set
-    // 'blockindex_retain' => 0 to keep the FULL chain forever (never prune; backfills
-    // toward genesis over many runs - needs a non-pruned node for deep history).
+    // in more slowly. Rows are tiny (per-block stats, no tx lists), so 'blockindex_retain'
+    // => 0 keeps the FULL chain forever (never prune). To populate all of history in one
+    // pass instead of waiting for the cron to trickle it in, run the throttled backfill:
+    //   php tools/backfill-index.php            (genesis -> tip, resumable, node-friendly)
+    // A non-pruned node is required for deep history (getblockstats needs the block data).
     'blockindex_per_run' => 150,
-    'blockindex_retain'  => 52560,   // 0 = retain the whole chain (never prune)
+    'blockindex_retain'  => 0,        // 0 = retain the whole chain (never prune); was 52560 (~90d)
     // 'version'    => '1.0.0',   // reported as `version` by /api/v1/backend-info
     // 'git_commit' => 'abc1234',  // reported as `gitCommit` by /api/v1/backend-info
 
@@ -139,6 +148,8 @@ return [
                 'port'    => 50001,   // ElectrumX SERVICES tcp:// port for LTC mainnet
                 'tls'     => false,
                 'timeout' => 8,
+                'retries' => 2,       // reconnect+retry attempts after the first, on a transport blip
+                'retry_timeout' => 3, // shortened per-retry connect/read timeout (s); bounds a hung electrs
             ],
             // MWEB (MimbleWimble Extension Blocks). Reads ONLY from litecoind's
             // JSON-RPC (the same calls the Esplora builders use); no analytics

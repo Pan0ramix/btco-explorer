@@ -130,20 +130,34 @@ function mweb_upsert_block_and_pegs(PDO $db, array $net, int $height, string $ha
     if ($m === null) {
         return;   // cursor still advances via mweb_meta_set_cursor
     }
-    $bt = lx_block_time_at($net, $hash) ?? 0;
+    // Prefer the block time already carried by the HogEx summary over a second header RPC: a
+    // transient miss on that RPC once stored block_time=0 and poisoned the supply chart with a
+    // permanent 1970 bucket. Only fall back to the header lookup if the summary lacks it.
+    $bt = $m['block_time'] > 0 ? (int) $m['block_time'] : (lx_block_time_at($net, $hash) ?? 0);
+    // MWEB-internal counts from the .mweb object (best-effort: null on a node without getblock
+    // verbosity 2 - peg data from the HogEx is unaffected either way). kernels = this block's
+    // confidential MWEB tx count; txos_total = the cumulative confidential output-set size.
+    $ec      = lx_mweb_ext_counts($net, $hash);
+    $kernels = is_array($ec) ? ($ec['kernels'] ?? null) : null;
+    $txos    = is_array($ec) ? ($ec['outputs'] ?? null) : null;
+    $inputs  = is_array($ec) ? ($ec['inputs'] ?? null) : null;
     $db->prepare(
         'INSERT INTO mweb_blocks
            (block_height, block_time, block_hash, hogex_txid, supply_sat,
-            pegin_count, pegin_total_sat, pegout_count, pegout_total_sat)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            pegin_count, pegin_total_sat, pegout_count, pegout_total_sat, kernels, txos_total, mweb_inputs)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(block_height) DO UPDATE SET
            block_time = excluded.block_time, block_hash = excluded.block_hash,
            hogex_txid = excluded.hogex_txid, supply_sat = excluded.supply_sat,
            pegin_count = excluded.pegin_count, pegin_total_sat = excluded.pegin_total_sat,
-           pegout_count = excluded.pegout_count, pegout_total_sat = excluded.pegout_total_sat'
+           pegout_count = excluded.pegout_count, pegout_total_sat = excluded.pegout_total_sat,
+           kernels = COALESCE(excluded.kernels, mweb_blocks.kernels),
+           txos_total = COALESCE(excluded.txos_total, mweb_blocks.txos_total),
+           mweb_inputs = COALESCE(excluded.mweb_inputs, mweb_blocks.mweb_inputs)'
     )->execute([
         $height, $bt, $hash, $m['hogex_txid'], $m['supply_sat'],
         $m['pegin_count'], $m['pegin_total_sat'], $m['pegout_count'], $m['pegout_total_sat'],
+        $kernels, $txos, $inputs,
     ]);
     $insPi = $db->prepare(
         'INSERT OR IGNORE INTO mweb_pegins (txid, vout, block_height, block_time, value_sat) VALUES (?, ?, ?, ?, ?)'
@@ -212,8 +226,8 @@ function mweb_rollback_to(PDO $db, array $net, int $height): void
 function mweb_index_refresh_meta(PDO $db, array $net): void
 {
     $row = $db->query(
-        'SELECT block_time, supply_sat FROM mweb_blocks WHERE supply_sat IS NOT NULL ORDER BY block_height DESC LIMIT 1'
-    )->fetch(PDO::FETCH_ASSOC);
+        'SELECT block_time, supply_sat FROM mweb_blocks WHERE supply_sat IS NOT NULL AND block_time > 0 ORDER BY block_height DESC LIMIT 1'
+    )->fetch(PDO::FETCH_ASSOC);   // block_time > 0: a transient 0-time tip must not seed a 1970 supply bucket
     if (!$row) {
         $db->prepare('UPDATE mweb_meta SET updated_at = ? WHERE id = 1')->execute([time()]);
         return;
@@ -226,18 +240,24 @@ function mweb_index_refresh_meta(PDO $db, array $net): void
     // advances day by day this settles each day's end-of-day supply + flow.
     $tipDay = intdiv($tipTime, 86400) * 86400;
     $eod = $db->prepare(
-        'SELECT block_height, supply_sat FROM mweb_blocks
+        'SELECT block_height, supply_sat, txos_total FROM mweb_blocks
          WHERE supply_sat IS NOT NULL AND block_time >= ? AND block_time < ?
          ORDER BY block_time DESC, block_height DESC LIMIT 1'
     );
     $piQ = $db->prepare('SELECT COALESCE(SUM(value_sat), 0) FROM mweb_pegins  WHERE block_time >= ? AND block_time < ?');
     $poQ = $db->prepare('SELECT COALESCE(SUM(value_sat), 0) FROM mweb_pegouts WHERE block_time >= ? AND block_time < ?');
+    $kQ  = $db->prepare('SELECT COALESCE(SUM(kernels), 0) FROM mweb_blocks WHERE block_time >= ? AND block_time < ?');   // MWEB tx count / day
+    // End-of-day cumulative output set: MAX (the set is monotonic) so a transient txos miss on the
+    // day's LAST block doesn't null the whole day and lump its output-adds into the next day.
+    $txQ = $db->prepare('SELECT MAX(txos_total) FROM mweb_blocks WHERE block_time >= ? AND block_time < ?');
+    $inQ = $db->prepare('SELECT COALESCE(SUM(mweb_inputs), 0) FROM mweb_blocks WHERE block_time >= ? AND block_time < ?');   // MWEB inputs / day
     $ups = $db->prepare(
-        'INSERT INTO mweb_supply_daily (day_ts, block_height, supply_sat, pegin_sat, pegout_sat)
-         VALUES (?, ?, ?, ?, ?)
+        'INSERT INTO mweb_supply_daily (day_ts, block_height, supply_sat, pegin_sat, pegout_sat, kernels, txos_end, inputs)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day_ts) DO UPDATE SET
            block_height = excluded.block_height, supply_sat = excluded.supply_sat,
-           pegin_sat = excluded.pegin_sat, pegout_sat = excluded.pegout_sat'
+           pegin_sat = excluded.pegin_sat, pegout_sat = excluded.pegout_sat,
+           kernels = excluded.kernels, txos_end = excluded.txos_end, inputs = excluded.inputs'
     );
     // Days to (re)compute: the 3 most recent (settle each run) PLUS any day that
     // has indexed blocks but no supply_daily row yet. The latter backfills the
@@ -249,7 +269,7 @@ function mweb_index_refresh_meta(PDO $db, array $net): void
     }
     $gaps = $db->query(
         'SELECT DISTINCT (block_time / 86400) * 86400 AS d FROM mweb_blocks
-         WHERE supply_sat IS NOT NULL
+         WHERE supply_sat IS NOT NULL AND block_time > 0
            AND (block_time / 86400) * 86400 NOT IN (SELECT day_ts FROM mweb_supply_daily)'
     )->fetchAll(PDO::FETCH_COLUMN);
     foreach ($gaps as $d) {
@@ -264,9 +284,15 @@ function mweb_index_refresh_meta(PDO $db, array $net): void
         }
         $piQ->execute([$lo, $hi]);
         $poQ->execute([$lo, $hi]);
+        $kQ->execute([$lo, $hi]);
+        $txQ->execute([$lo, $hi]);
+        $inQ->execute([$lo, $hi]);
+        $txosEnd = $txQ->fetchColumn();
         $ups->execute([
             $lo, (int) $last['block_height'], (int) $last['supply_sat'],
             (int) $piQ->fetchColumn(), (int) $poQ->fetchColumn(),
+            (int) $kQ->fetchColumn(), $txosEnd !== null && $txosEnd !== false ? (int) $txosEnd : null,
+            (int) $inQ->fetchColumn(),
         ]);
     }
 }

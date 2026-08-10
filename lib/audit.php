@@ -34,16 +34,16 @@ function lx_audit_db_path(): ?string
 
 function lx_audit_pdo(bool $create = false): ?PDO
 {
-    static $pdo = false;
-    if ($pdo !== false) {
+    static $pdo = null;            // memoize only a real handle; a null return re-attempts next call
+    if ($pdo instanceof PDO) {     // so a worker started before the DB was created self-heals once it exists
         return $pdo;
     }
     $path = lx_audit_db_path();
     if (!$path) {
-        return $pdo = null;
+        return null;
     }
     if (!$create && !is_file($path)) {
-        return $pdo = null;
+        return null;
     }
     try {
         if ($create) {
@@ -77,7 +77,7 @@ function lx_audit_pdo(bool $create = false): ?PDO
         }
         return $pdo = $db;
     } catch (Throwable $e) {
-        return $pdo = null;
+        return null;
     }
 }
 

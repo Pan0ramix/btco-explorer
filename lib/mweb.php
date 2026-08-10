@@ -319,20 +319,29 @@ function lx_mweb_range(array $net, int $from, int $to): array
     if ($to - $from + 1 > LX_MWEB_MAX_RANGE) {
         $to = $from + LX_MWEB_MAX_RANGE - 1;
     }
-    // Index fast path: instant when the peg index is fresh.
+    // Index fast path: instant when the peg index is fresh. The index can lag the tip by up to
+    // max_lag blocks, so it must NOT claim coverage past last_indexed - blocks in (last_indexed, to]
+    // aren't in mweb_blocks, and reporting to=$to would silently drop any peg events there. Cap the
+    // reported 'to' to the indexed extent so the client re-requests the tail (served by the RPC scan
+    // below); if the whole range sits above the index, fall through to that scan entirely.
     if (lx_mweb_index_ready($net) && ($db = lx_mweb_index_pdo($net, false)) !== null) {
         try {
-            $st = $db->prepare('SELECT * FROM mweb_blocks WHERE block_height BETWEEN ? AND ? '
-                . 'AND (pegin_count > 0 OR pegout_count > 0) ORDER BY block_height LIMIT ?');
-            $st->bindValue(1, $from, PDO::PARAM_INT);
-            $st->bindValue(2, $to, PDO::PARAM_INT);
-            $st->bindValue(3, LX_MWEB_MAX_RANGE, PDO::PARAM_INT);
-            $st->execute();
-            $blocks = [];
-            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $b) {
-                $blocks[] = lx_mweb_index_hydrate($db, $b);
+            $lastIdx = (int) $db->query('SELECT last_indexed FROM mweb_meta WHERE id = 1')->fetchColumn();
+            if ($lastIdx >= $from) {
+                $coverTo = min($to, $lastIdx);
+                $st = $db->prepare('SELECT * FROM mweb_blocks WHERE block_height BETWEEN ? AND ? '
+                    . 'AND (pegin_count > 0 OR pegout_count > 0) ORDER BY block_height LIMIT ?');
+                $st->bindValue(1, $from, PDO::PARAM_INT);
+                $st->bindValue(2, $coverTo, PDO::PARAM_INT);
+                $st->bindValue(3, LX_MWEB_MAX_RANGE, PDO::PARAM_INT);
+                $st->execute();
+                $blocks = [];
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $b) {
+                    $blocks[] = lx_mweb_index_hydrate($db, $b);
+                }
+                return ['from' => $from, 'to' => $coverTo, 'blocks' => $blocks];
             }
-            return ['from' => $from, 'to' => $to, 'blocks' => $blocks];
+            // requested range is entirely above the index -> fall through to the RPC scan
         } catch (Throwable $e) {
             // fall through to the bounded RPC scan
         }
@@ -376,7 +385,10 @@ CREATE TABLE IF NOT EXISTS mweb_blocks (
   pegin_count      INTEGER NOT NULL DEFAULT 0,
   pegin_total_sat  INTEGER NOT NULL DEFAULT 0,
   pegout_count     INTEGER NOT NULL DEFAULT 0,
-  pegout_total_sat INTEGER NOT NULL DEFAULT 0
+  pegout_total_sat INTEGER NOT NULL DEFAULT 0,
+  kernels          INTEGER,
+  txos_total       INTEGER,
+  mweb_inputs      INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_mweb_blocks_hash ON mweb_blocks(block_hash);
 CREATE INDEX IF NOT EXISTS idx_mweb_blocks_time ON mweb_blocks(block_time);
@@ -407,7 +419,10 @@ CREATE TABLE IF NOT EXISTS mweb_supply_daily (
   block_height INTEGER NOT NULL,
   supply_sat   INTEGER NOT NULL,
   pegin_sat    INTEGER NOT NULL DEFAULT 0,
-  pegout_sat   INTEGER NOT NULL DEFAULT 0
+  pegout_sat   INTEGER NOT NULL DEFAULT 0,
+  kernels      INTEGER NOT NULL DEFAULT 0,
+  txos_end     INTEGER,
+  inputs       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS mweb_meta (
   id                 INTEGER PRIMARY KEY CHECK (id = 1),
@@ -452,6 +467,17 @@ function lx_mweb_index_pdo(array $net, bool $create = false): ?PDO
         $db->exec('PRAGMA synchronous = NORMAL');
         if ($create) {
             $db->exec(LX_MWEB_INDEX_DDL);
+            // Idempotent migrations so a pre-existing index upgrades in place (MWEB-internal counts).
+            foreach ([
+                'ALTER TABLE mweb_blocks ADD COLUMN kernels INTEGER',
+                'ALTER TABLE mweb_blocks ADD COLUMN txos_total INTEGER',
+                'ALTER TABLE mweb_blocks ADD COLUMN mweb_inputs INTEGER',
+                'ALTER TABLE mweb_supply_daily ADD COLUMN kernels INTEGER NOT NULL DEFAULT 0',
+                'ALTER TABLE mweb_supply_daily ADD COLUMN txos_end INTEGER',
+                'ALTER TABLE mweb_supply_daily ADD COLUMN inputs INTEGER NOT NULL DEFAULT 0',
+            ] as $mig) {
+                try { $db->exec($mig); } catch (Throwable $e) { /* column already exists */ }
+            }
         }
         return $cache[$slug] = $db;
     } catch (Throwable $e) {
@@ -566,6 +592,37 @@ function lx_mweb_supply_series(array $net, int $limit = 400): array
             'pegin_sat'  => (int) $r['pegin_sat'],
             'pegout_sat' => (int) $r['pegout_sat'],
         ];
+    }
+    return $out;
+}
+
+/**
+ * MWEB-INTERNAL activity time-series (one point per UTC day), oldest-first: transaction kernels
+ * (the confidential MWEB tx count) and outputs ADDED (delta of the cumulative txos set). This is
+ * the internal-activity view that a dedicated MWEB explorer surfaces; it needs a node that serves
+ * the `.mweb` object at getblock verbosity 2 (best-effort - days before it was available read 0).
+ * Returns [['day_ts'=>, 'kernels'=>, 'outputs'=>], ...] or [].
+ */
+function lx_mweb_activity_series(array $net, int $limit = 400): array
+{
+    if (!lx_mweb_index_ready($net) || ($db = lx_mweb_index_pdo($net, false)) === null) {
+        return [];
+    }
+    $limit = max(1, min(2000, $limit));
+    try {
+        $st = $db->prepare('SELECT day_ts, kernels, txos_end, inputs FROM mweb_supply_daily ORDER BY day_ts DESC LIMIT ?');
+        $st->bindValue(1, $limit, PDO::PARAM_INT);
+        $st->execute();
+        $rows = array_reverse($st->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    } catch (Throwable $e) {
+        return [];   // columns not migrated yet / index too old
+    }
+    $out = []; $prevTxos = null;
+    foreach ($rows as $r) {
+        $txos = $r['txos_end'] !== null ? (int) $r['txos_end'] : null;
+        $added = ($txos !== null && $prevTxos !== null) ? max(0, $txos - $prevTxos) : 0;
+        $out[] = ['day_ts' => (int) $r['day_ts'], 'kernels' => (int) $r['kernels'], 'outputs' => $added, 'inputs' => (int) ($r['inputs'] ?? 0)];
+        if ($txos !== null) { $prevTxos = $txos; }
     }
     return $out;
 }
@@ -857,6 +914,7 @@ function lx_mweb_ext_counts(array $net, string $hash): ?array
     return [
         'kernels' => $kernels,
         'outputs' => $pick($m, ['num_txos', 'n_txos', 'num_outputs', 'output_count']),
+        'inputs'  => $pick($m, ['num_inputs', 'n_inputs', 'input_count']),   // best-effort: null if the build omits it
     ];
 }
 

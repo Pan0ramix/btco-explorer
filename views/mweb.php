@@ -65,6 +65,9 @@ lx_head($net, ['title' => 'MWEB - ' . $net['label'] . ' Explorer']);
       <?php if ($kern !== null && $kern['kernels'] > 0): ?>
       <div class="stat"><div class="muted sub"><?= lx_icon('box') ?>Kernels</div><div class="big-num sm"><?= commas($kern['kernels']) ?></div><div class="muted sub">in the latest block</div></div>
       <?php endif; ?>
+      <?php if ($kern !== null && !empty($kern['outputs'])): ?>
+      <div class="stat"><div class="muted sub"><?= lx_icon('database') ?>Output set</div><div class="big-num sm"><?= h(lx_num_compact((float) $kern['outputs'])) ?></div><div class="muted sub">confidential outputs (cumulative)</div></div>
+      <?php endif; ?>
       <div class="stat"><div class="muted sub"><?= lx_icon('activity') ?>Chain tip</div><div class="big-num sm"><a href="<?= h($base) ?>/block-height/<?= (int) $st['height'] ?>">#<?= commas($st['height']) ?></a></div><div class="muted sub">MWEB since <?= commas($act) ?></div></div>
     </div>
     <?php if (!$idx): ?>
@@ -281,6 +284,33 @@ lx_head($net, ['title' => 'MWEB - ' . $net['label'] . ' Explorer']);
             ['color' => 'var(--ok)',  'label' => 'Peg-in'],
             ['color' => 'var(--bad)', 'label' => 'Peg-out'],
         ],
+    ]) ?>
+  </div>
+</div>
+<?php endif; ?>
+
+<?php
+    // MWEB-internal activity: confidential transaction count (kernels) per day, from the .mweb
+    // object. This is the internal-throughput view a dedicated MWEB explorer surfaces; it appears
+    // only once the index has kernel data (a node serving getblock verbosity 2).
+    $mwAct = $idx ? lx_mweb_activity_series($net, $ranges[$rangeSel]) : [];
+    $hasAct = false; $actLbl = []; $actTip = [];
+    foreach ($mwAct as $p) {
+        if ((int) $p['kernels'] > 0) { $hasAct = true; }
+        $actLbl[] = gmdate('Y-m-d', (int) $p['day_ts']) . ' · ' . commas((int) $p['kernels']) . ' MWEB txs';
+        $actTip[] = lx_tip_json(gmdate('M j, Y', (int) $p['day_ts']), [
+            ['c' => '#6c5ce7', 'k' => 'MWEB txs', 'v' => commas((int) $p['kernels']) . ' kernels'],
+            ['c' => '#56b4e9', 'k' => 'Outputs added', 'v' => commas((int) $p['outputs'])],
+            ['c' => '#8c8f99', 'k' => 'Inputs spent', 'v' => commas((int) ($p['inputs'] ?? 0))],
+        ]);
+    }
+    if ($idx && count($mwAct) >= 2 && $hasAct):
+?>
+<div class="card">
+  <div class="card-h"><span><?= lx_icon('activity') ?>MWEB activity</span> <span class="sub">confidential transactions per day</span></div>
+  <div class="card-b">
+    <?= lx_chart_area($mwAct, 'day_ts', 'kernels', 'MWEB confidential transactions per day', $actLbl, [
+        'yfmt' => 'lx_num_compact', 'xticks' => lx_time_ticks($mwAct, 'day_ts'), 'tips' => $actTip, 'baseline' => 'zero',
     ]) ?>
   </div>
 </div>

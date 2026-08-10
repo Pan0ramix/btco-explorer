@@ -192,7 +192,27 @@ function lx_route_html(array $net, array $rest, string $method): void
             break;
 
         case 'charts':
+            // /charts/export?metric=<name>&period=<p> -> CSV download of a chart's series.
+            if (($rest[1] ?? '') === 'export') {
+                if (function_exists('lx_rate_limit') && !lx_rate_limit('csv', 60, 60)) {
+                    text_out("rate limit reached\n", 429, 'text/plain');
+                }
+                $metric = preg_replace('/[^a-z]/', '', strtolower((string) ($_GET['metric'] ?? '')));
+                $period = (isset($_GET['period']) && lx_period_valid((string) $_GET['period'])) ? (string) $_GET['period'] : '';
+                $csv = function_exists('lx_charts_export_csv') ? lx_charts_export_csv($net, $metric, $period) : null;
+                if ($csv === null) {
+                    lx_not_found($method);
+                }
+                if (!headers_sent()) {
+                    header('Content-Disposition: attachment; filename="lx-' . $metric . ($period !== '' ? '-' . $period : '') . '.csv"');
+                }
+                text_out($csv, 200, 'text/csv', 60);
+            }
             $view = 'charts';
+            break;
+
+        case 'richlist':
+            $view = 'richlist';
             break;
 
         case 'tv':
@@ -218,6 +238,10 @@ function lx_route_html(array $net, array $rest, string $method): void
 
         case 'node':
             $view = 'node';
+            break;
+
+        case 'halving':
+            $view = 'halving';
             break;
 
         case 'tools':
@@ -636,6 +660,34 @@ function lx_route_api(array $net, array $r, string $method): void
             if (($r[1] ?? '') === 'statistics') {
                 json_out(lx_statistics_api($net), 200, 30);
             }
+            // Network-activity timeseries (active addresses, CDD, tx/day, new addresses, median value).
+            if (($r[1] ?? '') === 'activity') {
+                $per = (string) ($r[2] ?? '');
+                if ($per !== '' && !lx_period_valid($per)) { api_error('Invalid time period', 400); }
+                json_out(lx_activity_api($net, $per), 200, 600);
+            }
+            // HODL-wave coin-age distribution (supply by coin age).
+            if (($r[1] ?? '') === 'coin-age') {
+                json_out(lx_coin_age_api($net), 200, 600);
+            }
+            // Rich list: wealth summary + top holders (?limit up to 1000).
+            if (($r[1] ?? '') === 'richlist') {
+                $lim = ctype_digit((string) ($r[2] ?? '')) ? (int) $r[2] : 100;
+                json_out(lx_richlist_api($net, $lim), 200, 300);
+            }
+            // Halving countdown (block-exact + estimated date).
+            if (($r[1] ?? '') === 'halving') {
+                $hv = lx_halving_api($net);
+                $hv ? json_out($hv, 200, 60) : api_error('Not found', 404);
+            }
+            // Per-block economics timeseries (fees/reward/txs/size/weight/value-sent/fee percentiles).
+            if (($r[1] ?? '') === 'blocks-economics') {
+                $per = (string) ($r[2] ?? '1w');
+                if (!lx_period_valid($per)) { api_error('Invalid time period', 400); }
+                // 'all' loads the whole index into PHP before bucketing; throttle the cold-cache origin hit.
+                if (function_exists('lx_rate_limit') && !lx_rate_limit('charts_series', 90, 60)) { api_error('rate limited', 429); }
+                json_out(function_exists('lx_blockindex_series') ? lx_blockindex_series($net, $per) : [], 200, 600);
+            }
             if (($r[1] ?? '') === 'mining' && ($r[2] ?? '') === 'pools') {
                 json_out(lx_mining_pools_api($net), 200, 120);
             }
@@ -649,6 +701,7 @@ function lx_route_api(array $net, array $r, string $method): void
                 && in_array($r[3] ?? '', ['fees', 'rewards', 'fee-rates', 'sizes-weights'], true)) {
                 $per = (string) ($r[4] ?? '1w');
                 if (!lx_period_valid($per)) { api_error('Invalid time period', 400); }
+                if (function_exists('lx_rate_limit') && !lx_rate_limit('charts_series', 90, 60)) { api_error('rate limited', 429); }
                 switch ($r[3]) {
                     case 'fees':          json_out(lx_mining_blocks_fees_api($net, $per), 200, 600);
                     case 'rewards':       json_out(lx_mining_blocks_rewards_api($net, $per), 200, 600);
@@ -773,6 +826,10 @@ function lx_route_api(array $net, array $r, string $method): void
             if ($sub === 'supply') {
                 $limit = max(1, min(2000, (int) ($_GET['limit'] ?? 400)));
                 json_out(['series' => lx_mweb_supply_series($net, $limit)], 200, 30);
+            }
+            if ($sub === 'activity') {
+                $limit = max(1, min(2000, (int) ($_GET['limit'] ?? 400)));
+                json_out(['series' => lx_mweb_activity_series($net, $limit)], 200, 30);
             }
             if ($sub === 'clusters') {
                 $limit = max(1, min(100, (int) ($_GET['limit'] ?? 15)));

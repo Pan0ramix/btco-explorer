@@ -139,7 +139,7 @@ function lx_og_data(array $net, string $type, string $id): ?array
             $tx = lx_find_tx($net, $id);
             if (!$tx) { return null; }
             $out = 0;
-            foreach (($tx['vout'] ?? []) as $vo) { $out += coin_to_sat($vo['value'] ?? 0); }
+            foreach (($tx['vout'] ?? []) as $vo) { $out += (int) ($vo['value'] ?? 0); }   // Esplora vout.value is already satoshis
             $conf = !empty($tx['status']['confirmed']);
             $status = $conf
                 ? ('confirmed' . (isset($tx['status']['block_height']) ? ' in block ' . commas((int) $tx['status']['block_height']) : ''))
@@ -168,6 +168,24 @@ function lx_og_data(array $net, string $type, string $id): ?array
                     'lines' => [shorten($id, 16, 12),
                                 'balance ' . lx_amount($net, $bal) . ' · ' . commas($tot) . ' transactions'],
                     'accent' => $accent, 'ttl' => 120];   // balance is mutable -> short cache
+        }
+        if ($utxo && $type === 'richlist') {
+            $ws = function_exists('lx_wealth_summary') ? lx_wealth_summary($net) : null;
+            if (!$ws) { return null; }   // index not built -> fall back to the static banner
+            $supply = (int) ($ws['total_sat'] ?? 0);
+            $topPct = $supply > 0 ? number_format((int) ($ws['top100_sat'] ?? 0) / $supply * 100, 1) : '0';
+            return ['title' => 'Rich list',
+                    'lines' => [commas((int) ($ws['addr_count'] ?? 0)) . ' addresses · Gini ' . number_format((float) ($ws['gini'] ?? 0), 3),
+                                'top 100 hold ' . $topPct . '% of the transparent supply'],
+                    'accent' => $accent, 'ttl' => 3600];
+        }
+        if ($utxo && $type === 'halving') {
+            $s = function_exists('lx_supply_info') ? lx_supply_info($net) : null;
+            if (!$s) { return null; }    // no supply data (non-ltc / node down) -> static banner
+            return ['title' => 'Halving countdown',
+                    'lines' => [commas(max(0, (int) $s['blocks_to_halving'])) . ' blocks to the next halving',
+                                'reward ' . lx_coin((int) $s['reward_sat']) . ' → ' . lx_coin((int) $s['next_reward_sat']) . ' ' . $net['unit'] . ' · est. ' . gmdate('M j, Y', (int) $s['halving_eta'])],
+                    'accent' => $accent, 'ttl' => 600];
         }
     } catch (Throwable $e) {
         return null;
@@ -253,7 +271,7 @@ function lx_route_og(array $segs, string $method): void
     }
     $type = isset($segs[0]) ? preg_replace('/\.png$/', '', $segs[0]) : 'home';
     $id   = isset($segs[1]) ? preg_replace('/\.png$/', '', $segs[1]) : '';
-    if (strlen($id) > 130 || !preg_match('/^[a-z]+$/', (string) $type)) {   // guard: ids are hashes/heights/addresses
+    if (strlen($id) > 130 || !preg_match('/^[a-z]+$/', (string) $type) || ($id !== '' && !ctype_alnum($id))) {   // guard: ids are hashes/heights/addresses (all alnum)
         header('Location: ' . $fallback, true, 302);
         return;
     }

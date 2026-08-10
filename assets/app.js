@@ -394,6 +394,27 @@
     var dot = fig.querySelector('.lx-dot');
     var live = fig.querySelector('.lx-live');
     var cur = -1;
+    // Optional horizontal zoom/pan. The visible model-x window [x0,x1] defaults to
+    // [0,1], where toScreen()/nearest() are identities and the viewBox is untouched
+    // -> the un-zoomed chart is byte-identical to before; zoom is a pure add-on.
+    var x0 = 0, x1 = 1;
+    var xax = fig.querySelector('.lx-xax');
+    var xspans = xax ? [].slice.call(xax.querySelectorAll('span')) : [];
+    xspans.forEach(function (s) { s.dataset.f = (parseFloat(s.style.left) || 0) / 100; });
+    var zoomable = bands.length > 8;             // not worth zooming a handful of points
+    function span() { return x1 - x0; }
+    function toScreen(f) { return (f - x0) / span(); }
+    function applyZoom() {
+      var z = (x0 !== 0 || x1 !== 1);
+      svg.setAttribute('viewBox', (x0 * vbW) + ' 0 ' + (span() * vbW) + ' ' + vbH);
+      svg.classList.toggle('lx-zoomed', z);
+      for (var i = 0; i < xspans.length; i++) {
+        var sf = toScreen(parseFloat(xspans[i].dataset.f));
+        if (sf < -0.001 || sf > 1.001) { xspans[i].style.display = 'none'; }
+        else { xspans[i].style.display = ''; xspans[i].style.left = (sf * 100) + '%'; }
+      }
+    }
+    function resetZoom() { if (x0 !== 0 || x1 !== 1) { x0 = 0; x1 = 1; applyZoom(); } }
     function clear() {
       cur = -1; tipHide();
       if (dot) { dot.hidden = true; }
@@ -412,10 +433,10 @@
       if (fy === fy) {                             // not NaN
         var hz = svgLine(svg, 'lx-crosshair-h', true, vbW, vbH);
         hz.setAttribute('y1', fy * vbH); hz.setAttribute('y2', fy * vbH); hz.style.display = 'block';
-        if (dot) { dot.style.left = (fx * 100) + '%'; dot.style.top = (fy * 100) + '%'; dot.hidden = false; }
+        if (dot) { dot.style.left = (toScreen(fx) * 100) + '%'; dot.style.top = (fy * 100) + '%'; dot.hidden = false; }
       }
       var r = svg.getBoundingClientRect();
-      var px = evt ? evt.clientX : r.left + fx * r.width;
+      var px = evt ? evt.clientX : r.left + toScreen(fx) * r.width;
       var py = r.top + (fy === fy ? fy * r.height : r.height * 0.35);
       var raw = b.getAttribute('data-tip'), data = null;
       if (raw) { try { data = JSON.parse(raw); } catch (e) {} }
@@ -427,9 +448,9 @@
       }
     }
     function nearest(clientX) {
-      var r = svg.getBoundingClientRect(), fx = (clientX - r.left) / r.width, best = 0, bd = 9;
+      var r = svg.getBoundingClientRect(), sf = (clientX - r.left) / r.width, mf = x0 + sf * span(), best = 0, bd = 9;
       for (var i = 0; i < bands.length; i++) {
-        var d = Math.abs(parseFloat(bands[i].getAttribute('data-fx')) - fx);
+        var d = Math.abs(parseFloat(bands[i].getAttribute('data-fx')) - mf);
         if (d < bd) { bd = d; best = i; }
       }
       return best;
@@ -442,8 +463,34 @@
       else if (e.key === 'ArrowLeft') { activate(cur < 0 ? bands.length - 1 : Math.max(0, cur - 1)); e.preventDefault(); }
       else if (e.key === 'Home') { activate(0); e.preventDefault(); }
       else if (e.key === 'End') { activate(bands.length - 1); e.preventDefault(); }
-      else if (e.key === 'Escape') { clear(); svg.blur(); }
+      else if (e.key === 'Escape') { resetZoom(); clear(); svg.blur(); }
     });
+    if (zoomable) {
+      // Wheel narrows/widens the window around the cursor; drag pans a zoomed view;
+      // double-click or Escape restores the full range. Pointer handlers coexist with
+      // the crosshair listeners above (they read the same x0/x1 window).
+      svg.addEventListener('wheel', function (e) {
+        // Only Ctrl/Cmd+wheel zooms; a plain wheel must scroll the page (a full-width chart
+        // would otherwise trap vertical scrolling under the pointer).
+        if (!e.ctrlKey && !e.metaKey) { return; }
+        e.preventDefault();
+        var r = svg.getBoundingClientRect(), sf = (e.clientX - r.left) / r.width, mf = x0 + sf * span();
+        var ns = Math.max(0.04, Math.min(1, span() * (e.deltaY < 0 ? 0.8 : 1.25)));
+        var nx0 = mf - sf * ns; if (nx0 < 0) { nx0 = 0; } if (nx0 + ns > 1) { nx0 = 1 - ns; }
+        x0 = nx0; x1 = nx0 + ns; applyZoom();
+        if (cur >= 0) { activate(cur); }
+      }, { passive: false });
+      var drag = null, dragBase = 0;
+      svg.addEventListener('pointerdown', function (e) { drag = e.clientX; dragBase = x0; });
+      window.addEventListener('pointerup', function () { drag = null; });
+      svg.addEventListener('pointermove', function (e) {
+        if (drag === null || (x0 === 0 && x1 === 1)) { return; }
+        var r = svg.getBoundingClientRect(), s = span(), dm = (e.clientX - drag) / r.width * s;
+        var nx0 = Math.max(0, Math.min(1 - s, dragBase - dm));
+        x0 = nx0; x1 = nx0 + s; applyZoom();
+      });
+      svg.addEventListener('dblclick', function (e) { e.preventDefault(); resetZoom(); });
+    }
     svg.addEventListener('blur', clear);
   }
   document.querySelectorAll('.lx-chart').forEach(initFramedChart);

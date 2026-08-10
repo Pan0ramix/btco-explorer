@@ -36,6 +36,8 @@ function lx_icon(string $name, string $cls = 'ico'): string
         'activity'    => '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
         'share-2'     => '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
         'copy'        => '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+        'award'       => '<circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>',
+        'users'       => '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
         'zap'         => '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
         'trending-up' => '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
         'database'    => '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
@@ -170,7 +172,7 @@ function lx_head(array $net, array $opt = []): void
         'query-input' => 'required name=query',
     ],
 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
-<link rel="stylesheet" href="/assets/app.css?v=51">
+<link rel="stylesheet" href="/assets/app.css?v=55">
 </head>
 <body style="--brand:<?= h(lx_brand_color(isset($net['coin']) ? $net['coin'] : '')) ?>">
 <a class="skip-link" href="#main">Skip to content</a>
@@ -189,15 +191,19 @@ function lx_head(array $net, array $opt = []): void
       <a href="<?= h($base) ?>/mining"><?= lx_icon('cpu') ?>Mining</a>
       <?php if ($isUtxo): ?><a href="<?= h($base) ?>/charts"><?= lx_icon('trending-up') ?>Charts</a><?php endif; ?>
       <?php if ($isUtxo): ?><a href="<?= h($base) ?>/node"><?= lx_icon('hard-drive') ?>Node</a><?php endif; ?>
+      <?php if ($isUtxo): ?><a href="<?= h($base) ?>/richlist"><?= lx_icon('award') ?>Rich list</a><?php endif; ?>
+      <?php if ($isUtxo): ?><a href="<?= h($base) ?>/halving"><?= lx_icon('gift') ?>Halving</a><?php endif; ?>
       <?php if (lx_mweb_enabled($net)): ?><a href="<?= h($base) ?>/mweb"><?= lx_icon('mweb') ?>MWEB</a><?php endif; ?>
       <a href="<?= h($base) ?>/tools"><?= lx_icon('tool') ?>Tools</a>
       <?php if ($isUtxo): ?><a href="/docs"><?= lx_icon('code') ?>API</a><?php endif; ?>
       <a href="/donate"><?= lx_icon('heart') ?>Donate</a>
+      <div class="nav-ctl">
       <?php $ccys = function_exists('lx_price_config') ? lx_price_config()['currencies'] : []; if (count($ccys) > 1): $ccyDef = strtoupper(lx_price_config()['display']); ?>
       <select class="ccy-sel" id="ccy-sel" data-default="<?= h($ccyDef) ?>" aria-label="Display currency" title="Display currency"><?php foreach ($ccys as $cc): $ccU = strtoupper($cc); ?><option value="<?= h($ccU) ?>"<?= $ccU === $ccyDef ? ' selected' : '' ?>><?= h($ccU) ?></option><?php endforeach; ?></select>
       <?php endif; ?>
       <select class="denom-sel" id="denom-sel" aria-label="Amount unit" title="Amount unit"><option value="ltc" selected>LTC</option><option value="mltc">mLTC</option><option value="lit">lit</option></select>
       <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle light / dark theme" title="Toggle theme"><?= lx_icon('sun', 'ico ico-sun') ?><?= lx_icon('moon', 'ico ico-moon') ?></button>
+      </div>
     </div>
   </div>
 </nav>
@@ -211,15 +217,42 @@ function lx_footer(): void
     ?>
 <footer>
   <div class="foot-inner">
-    <a href="/status">Status</a>
-    <a href="/donate">Donate</a>
-    <a class="ext" href="https://litecoin.org" target="_blank" rel="noopener">Litecoin.org</a>
-    <a class="ext" href="https://testnetscan.com/ltc-testnet/" target="_blank" rel="noopener" title="Litecoin testnet explorer">Testnet</a>
-    <a class="ext" href="https://github.com/Tech1k/litecoinexplorer.org" target="_blank" rel="noopener">Source</a>
-    <a class="ext" href="https://github.com/Tech1k/litecoinexplorer.org/blob/HEAD/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a>
-    <span class="faint">·</span>
-    <span>Made by <a class="ext" href="https://tech1k.com" target="_blank" rel="noopener">Tech1k</a></span>
-    <span class="faint">· Litecoin, block by block</span>
+    <div class="foot-brand">
+      <a class="brand" href="/"><img class="brand-ico" src="/assets/favicon.svg" alt=""><span>Litecoin<b>Explorer</b></span></a>
+      <p class="foot-tag">Open-source Litecoin block explorer with first-class MWEB support, live from the node.</p>
+    </div>
+    <div class="foot-cols" role="navigation" aria-label="Footer">
+      <div class="foot-col">
+        <h4>Explore</h4>
+        <a href="/blocks">Blocks</a>
+        <a href="/mempool">Mempool</a>
+        <a href="/mining">Mining</a>
+        <a href="/charts">Charts</a>
+        <a href="/richlist">Rich list</a>
+        <a href="/halving">Halving</a>
+        <a href="/mweb">MWEB</a>
+      </div>
+      <div class="foot-col">
+        <h4>Developers</h4>
+        <a href="/docs">API</a>
+        <a href="/node">Node</a>
+        <a href="/tools">Tools</a>
+        <a href="/status">Status</a>
+      </div>
+      <div class="foot-col">
+        <h4>Project</h4>
+        <a href="/donate">Donate</a>
+        <a class="ext" href="https://github.com/Tech1k/litecoinexplorer.org" target="_blank" rel="noopener">Source</a>
+        <a class="ext" href="https://litecoin.org" target="_blank" rel="noopener">Litecoin.org</a>
+        <a class="ext" href="https://testnetscan.com/ltc-testnet/" target="_blank" rel="noopener" title="Litecoin testnet explorer">Testnet</a>
+      </div>
+    </div>
+  </div>
+  <div class="foot-bar">
+    <div class="foot-bar-in">
+      <span>&copy; <?= gmdate('Y') ?> LitecoinExplorer &middot; <a class="ext" href="https://github.com/Tech1k/litecoinexplorer.org/blob/HEAD/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a></span>
+      <span>Made by <a class="ext" href="https://tech1k.com" target="_blank" rel="noopener">Tech1k</a> &middot; Litecoin, block by block</span>
+    </div>
   </div>
 </footer>
 <?php
@@ -234,7 +267,7 @@ function lx_foot(array $net, array $opt = []): void
 <span class="sr-only" id="copy-live" aria-live="polite"></span>   <!-- copy-success announcement for screen readers -->
 
 <?php if (!empty($opt['qr'])): ?><script src="/assets/qrcode.js?v=1" defer></script><?php endif; ?>
-<script src="/assets/app.js?v=30" defer></script>
+<script src="/assets/app.js?v=32" defer></script>
 </body>
 </html>
 <?php
@@ -508,9 +541,12 @@ function lx_chart_area(array $rows, string $xKey, string $yKey, string $label = 
         $xs[] = (float) ($r[$xKey] ?? 0);
         $ys[] = (float) ($r[$yKey] ?? 0);
     }
+    $ysRaw = $ys;                                 // pre-log values (for moving-average + log tick labels)
+    $useLog = $opts && !empty($opts['log']);
+    if ($useLog) { foreach ($ys as $i => $yv) { $ys[$i] = log10(max(1e-8, $yv)); } }   // plot in log10 space
     $minX = min($xs); $spanX = max(1e-9, max($xs) - $minX);
     $minY = min($ys); $maxY = max($ys);
-    if (!empty($opts['baseline']) && $opts['baseline'] === 'zero') {
+    if (!empty($opts['baseline']) && $opts['baseline'] === 'zero' && !$useLog) {
         $minY = min(0.0, $minY);                 // anchor the area to zero (kills exaggerated wiggle)
     }
     $spanY = $maxY - $minY;
@@ -525,7 +561,14 @@ function lx_chart_area(array $rows, string $xKey, string $yKey, string $label = 
     // and its quarter-lines. A flat framed series draws no horizontal rules.
     $plotMin = $minY; $plotSpan = $spanY;
     $yt = null;
-    if ($opts && !$flat) {
+    if ($opts && !$flat && $useLog) {
+        // Log axis: gridlines land on decades (10^n); tick 'v' is the ORIGINAL value so the label formats normally.
+        $lo = (float) floor($minY); $hi = (float) ceil($maxY);
+        if ($hi <= $lo) { $hi = $lo + 1.0; }
+        $plotMin = $lo; $plotSpan = max(1e-9, $hi - $lo);
+        $yt = [];
+        for ($d = (int) $lo; $d <= (int) $hi; $d++) { $yt[] = ['v' => pow(10, $d), 'f' => ($d - $lo) / $plotSpan]; }
+    } elseif ($opts && !$flat) {
         $ax = lx_nice_bounds($minY, $maxY, isset($opts['ytickn']) ? (int) $opts['ytickn'] : 4);
         $plotMin  = $ax['min'];
         $plotSpan = max(1e-9, $ax['max'] - $ax['min']);
@@ -559,6 +602,23 @@ function lx_chart_area(array $rows, string $xKey, string $yKey, string $label = 
     $line = implode(' ', $pts);
     $area = $pad . ',' . ($pad + $ih) . ' ' . $line . ' ' . ($pad + $iw) . ',' . ($pad + $ih);
 
+    // Optional moving-average overlay (opts['ma'] = window size): computed on the raw values then
+    // projected into the same (linear or log) plot space, drawn as a second distinct line.
+    $maLine = '';
+    if ($opts && !empty($opts['ma']) && !$flat) {
+        $w = max(2, (int) $opts['ma']); $mpts = [];
+        for ($i = 0; $i < $n; $i++) {
+            $lo2 = max(0, $i - $w + 1); $sum = 0.0; $cnt = 0;
+            for ($j = $lo2; $j <= $i; $j++) { $sum += $ysRaw[$j]; $cnt++; }
+            $mv = $cnt ? $sum / $cnt : 0.0;
+            $mvp = $useLog ? log10(max(1e-8, $mv)) : $mv;
+            $mx = $pad + ($xs[$i] - $minX) / $spanX * $iw;
+            $my = $pad + $ih - ($mvp - $plotMin) / $plotSpan * $ih;
+            $mpts[] = round($mx, 2) . ',' . round($my, 2);
+        }
+        $maLine = '<polyline class="lx-ma-line" points="' . h(implode(' ', $mpts)) . '"/>';
+    }
+
     // Per-point hover bands: a <title> for JS-off / native tooltips, plus (when
     // framed) data-fx/fy/tip that the app.js controller reads for the crosshair,
     // dot and rich tooltip. Legacy path (no $opts) is byte-identical to before.
@@ -587,6 +647,7 @@ function lx_chart_area(array $rows, string $xKey, string $yKey, string $label = 
          . $grid
          . '<polygon fill="url(#' . $id . ')" points="' . h($area) . '"/>'
          . '<polyline class="lx-area-line" points="' . h($line) . '"/>'
+         . $maLine
          . $hover . '</svg>';
     if (!$opts) {
         return $svg;
@@ -599,16 +660,20 @@ function lx_chart_area(array $rows, string $xKey, string $yKey, string $label = 
     $ystep = count($yt) >= 2 ? abs($yt[1]['v'] - $yt[0]['v']) : 0.0;
     $ticks = [];
     if ($flat) {
-        $ticks[] = ['f' => 0.5, 'label' => $fmt($minY, 0.0)];
+        // In log mode $minY is a log10 value; label the REAL (pre-log) value so a flat log chart
+        // reads "32 T", not "13.5". $ysRaw holds the un-transformed series.
+        $ticks[] = ['f' => 0.5, 'label' => $fmt($useLog ? $ysRaw[0] : $minY, 0.0)];
     } else {
         foreach ($yt as $t) {
             $ticks[] = ['f' => $t['f'], 'label' => $fmt($t['v'], $ystep)];
         }
     }
+    $legend = isset($opts['legend']) ? $opts['legend'] : [];
+    if (!empty($opts['ma'])) { $legend[] = ['color' => 'var(--accent-2)', 'label' => ((int) $opts['ma']) . '-pt average']; }
     return lx_chart_frame($svg, [
         'ticks'  => $ticks,
         'xticks' => isset($opts['xticks']) ? $opts['xticks'] : [],
-        'legend' => isset($opts['legend']) ? $opts['legend'] : [],
+        'legend' => $legend,
     ]);
 }
 
@@ -1249,4 +1314,97 @@ function lx_spk_label(string $type): string
         return 'Witness v' . $mm[1];
     }
     return strtoupper($type);
+}
+
+/**
+ * Build a CSV export of a named chart metric's series, or null for an unknown metric. Powers
+ * /charts/export?metric=<name>&period=<p> - a data-download feature no other Litecoin explorer
+ * offers. Extend the switch to add more series.
+ */
+function lx_charts_export_csv(array $net, string $metric, string $period): ?string
+{
+    $fmt = function ($v): string {
+        if (is_float($v)) { $s = rtrim(rtrim(sprintf('%.8f', $v), '0'), '.'); return $s === '' ? '0' : $s; }
+        return (string) $v;
+    };
+    $emit = function (array $header, array $data) use ($fmt): string {
+        $out = implode(',', $header) . "\n";
+        foreach ($data as $row) {
+            $cells = array_map(function ($v) use ($fmt) {
+                $s = $fmt($v);
+                return (strpbrk($s, ",\"\n") !== false) ? '"' . str_replace('"', '""', $s) . '"' : $s;
+            }, $row);
+            $out .= implode(',', $cells) . "\n";
+        }
+        return $out;
+    };
+    switch ($metric) {
+        case 'blocks':
+            if (!function_exists('lx_blockindex_series')) { return null; }
+            $rows = [];
+            foreach (lx_blockindex_series($net, $period ?: '1m', 5000) as $b) {
+                $rows[] = [
+                    (int) $b['avgHeight'], (int) $b['timestamp'], gmdate('Y-m-d\TH:i:s\Z', (int) $b['timestamp']),
+                    (float) $b['avgTxs'], (float) $b['avgFees'], (float) $b['avgRewards'], (float) $b['avgSize'],
+                    (float) $b['avgWeight'], (float) ($b['avgOut'] ?? 0),
+                    (float) $b['p10'], (float) $b['p25'], (float) $b['p50'], (float) $b['p75'], (float) $b['p90'],
+                ];
+            }
+            if (!$rows) { return null; }
+            return $emit(['avg_height', 'timestamp', 'date_utc', 'avg_txs', 'avg_fees_sat', 'avg_reward_sat',
+                'avg_size_bytes', 'avg_weight', 'value_sent_sat', 'feerate_p10', 'feerate_p25', 'feerate_p50',
+                'feerate_p75', 'feerate_p90'], $rows);
+        case 'activity':
+            if (!function_exists('lx_activity_series')) { return null; }
+            $rows = [];
+            foreach (lx_activity_series($net, $period, 5000) as $r) {
+                $rows[] = [(int) $r['day'], gmdate('Y-m-d', (int) $r['day']), (float) $r['active'], (float) $r['cdd'], (float) $r['txs'],
+                    (float) ($r['newAddr'] ?? 0), (float) ($r['medVal'] ?? 0), (float) ($r['p10Val'] ?? 0), (float) ($r['p90Val'] ?? 0)];
+            }
+            if (!$rows) { return null; }
+            return $emit(['day_ts', 'date_utc', 'active_addresses', 'coin_days_destroyed', 'transactions',
+                'new_addresses', 'median_tx_value_sat', 'p10_tx_value_sat', 'p90_tx_value_sat'], $rows);
+        case 'difficulty':
+            if (!function_exists('lx_difficulty_series')) { return null; }
+            $rows = [];
+            foreach (lx_difficulty_series($net, 60, 12000) as $d) {
+                $rows[] = [(int) $d['height'], (int) $d['time'], gmdate('Y-m-d\TH:i:s\Z', (int) $d['time']), (float) $d['difficulty'], (float) $d['hashrate']];
+            }
+            if (!$rows) { return null; }
+            return $emit(['height', 'timestamp', 'date_utc', 'difficulty', 'hashrate_hs'], $rows);
+        case 'price':
+            if (!function_exists('lx_price_history') || !function_exists('lx_price_config')) { return null; }
+            $cur  = strtoupper((string) (lx_price_config()['display'] ?? 'usd'));
+            $rows = [];
+            foreach ((lx_price_history($net)['prices'] ?? []) as $p) {
+                if (!isset($p['time'], $p[$cur])) { continue; }
+                $rows[] = [(int) $p['time'], gmdate('Y-m-d\TH:i:s\Z', (int) $p['time']), (float) $p[$cur]];
+            }
+            if (!$rows) { return null; }
+            return $emit(['timestamp', 'date_utc', 'price_' . strtolower($cur)], $rows);
+        case 'mempool':
+            if (!function_exists('lx_stats_series')) { return null; }
+            $rows = [];
+            foreach (lx_stats_series($net, 720) as $s) {
+                $rows[] = [(int) $s['ts'], gmdate('Y-m-d\TH:i:s\Z', (int) $s['ts']), (int) ($s['mempool_count'] ?? 0), (int) ($s['mempool_vsize'] ?? 0), (int) ($s['fast_fee'] ?? 0)];
+            }
+            if (!$rows) { return null; }
+            return $emit(['timestamp', 'date_utc', 'mempool_txs', 'mempool_vsize', 'fast_fee_sat_vb'], $rows);
+        case 'pools':
+            if (!function_exists('lx_pool_share_series')) { return null; }
+            $ps = lx_pool_share_series($net, 8);
+            $pools = $ps['pools'] ?? []; $prows = $ps['rows'] ?? [];
+            if (!$prows || !$pools) { return null; }
+            $rows = [];
+            foreach ($prows as $r) {
+                $row = [(int) $r['ts'], gmdate('Y-m-d', (int) $r['ts'])];
+                foreach ($pools as $pn) { $row[] = round((float) ($r[$pn] ?? 0), 2); }
+                $rows[] = $row;
+            }
+            $hdr = array_merge(['day_ts', 'date_utc'], array_map(function ($p) {
+                return 'pct_' . preg_replace('/[^a-z0-9]+/', '_', strtolower((string) $p));
+            }, $pools));
+            return $emit($hdr, $rows);
+    }
+    return null;
 }

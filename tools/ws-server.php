@@ -84,6 +84,7 @@ function ws_decode(string &$buf): array
         $n = strlen($buf);
         if ($n < 2) { break; }
         $b2     = ord($buf[1]);
+        $fin    = (ord($buf[0]) & 0x80) !== 0;
         $opcode = ord($buf[0]) & 0x0f;
         $masked = ($b2 & 0x80) !== 0;
         $len    = $b2 & 0x7f;
@@ -97,7 +98,7 @@ function ws_decode(string &$buf): array
             $len = unpack('J', substr($buf, 2, 8))[1];
             $off = 10;
         }
-        if ($len > 2000000) { $frames[] = [0x8, '']; $buf = ''; break; }   // oversized -> signal close (can't resync)
+        if ($len > 2000000) { $frames[] = [0x8, '', true]; $buf = ''; break; }   // oversized -> signal close (can't resync)
         $mask = '';
         if ($masked) {
             if ($n < $off + 4) { break; }
@@ -112,7 +113,7 @@ function ws_decode(string &$buf): array
             $payload = $um;
         }
         $buf    = substr($buf, $off + $len);
-        $frames[] = [$opcode, $payload];
+        $frames[] = [$opcode, $payload, $fin];
     }
     return $frames;
 }
@@ -123,7 +124,7 @@ $clients = [];   // (int)$sock => state
 function ws_client_new($sock): array
 {
     return [
-        'sock' => $sock, 'hs' => false, 'buf' => '', 'born' => time(),
+        'sock' => $sock, 'hs' => false, 'buf' => '', 'frag' => '', 'born' => time(),
         'wants' => [], 'trackTx' => null, 'trackAddr' => null, 'trackRbf' => false,
         'trackTxs' => [], 'trackAddrs' => [], 'trackMpTxids' => false, 'mpNeedsFull' => false,
         'notified' => [], 'seenAddr' => [], 'seenAddrs' => [],
@@ -267,6 +268,13 @@ while (true) {
                 continue;
             }
             $clients[$id]['buf'] .= $chunk;
+            // Post-handshake read-buffer cap (the pre-handshake cap is below). A peer that declares
+            // a large frame length and then trickles the body never completes a frame, so ws_decode
+            // never drains buf; without this, 512 such connections could grow to ~1 GB and OOM the
+            // daemon. Legit control frames are a few KB.
+            if ($clients[$id]['hs'] && strlen($clients[$id]['buf']) > 262144) {
+                @fclose($sock); unset($clients[$id]); continue;
+            }
 
             if (!$clients[$id]['hs']) {
                 // Guard the pre-handshake buffer: a peer streaming bytes that never
@@ -280,7 +288,7 @@ while (true) {
                 }
                 continue;
             }
-            foreach (ws_decode($clients[$id]['buf']) as [$op, $payload]) {
+            foreach (ws_decode($clients[$id]['buf']) as [$op, $payload, $fin]) {
                 if ($op === 0x8) {                       // close
                     @ws_write($sock, ws_encode('', 0x8));
                     @fclose($sock); unset($clients[$id]);
@@ -288,10 +296,20 @@ while (true) {
                 }
                 if ($op === 0x9) { ws_write($sock, ws_encode($payload, 0xA)); continue; } // ping->pong
                 if ($op === 0xA) { continue; }            // pong
-                if ($op === 0x1 && isset($clients[$id])) {
-                    // A single malformed/hostile message must never take down the whole daemon.
-                    try { ws_on_message($clients[$id], $payload, $net); }
-                    catch (Throwable $e) { fwrite(STDERR, "[ws] on_message: " . $e->getMessage() . "\n"); }
+                // Data frame: reassemble fragments. A text frame (0x1) with FIN=0 starts a message
+                // that continues in 0x0 continuation frames until one has FIN set; an unfragmented
+                // message is just 0x1 with FIN=1. Control frames (>=0x8) are handled above and are
+                // never fragmented. Bound the reassembly buffer as a DoS guard.
+                if (($op === 0x1 || $op === 0x0) && isset($clients[$id])) {
+                    $clients[$id]['frag'] .= $payload;
+                    if (strlen($clients[$id]['frag']) > 262144) { @fclose($sock); unset($clients[$id]); break; }
+                    if ($fin) {
+                        $full = $clients[$id]['frag'];
+                        $clients[$id]['frag'] = '';
+                        // A single malformed/hostile message must never take down the whole daemon.
+                        try { ws_on_message($clients[$id], $full, $net); }
+                        catch (Throwable $e) { fwrite(STDERR, "[ws] on_message: " . $e->getMessage() . "\n"); }
+                    }
                 }
             }
         }
@@ -315,15 +333,20 @@ while (true) {
         }
         $newBlock = ($tip !== $last['tip'] && $last['tip'] >= 0);
         $firstTip = ($last['tip'] < 0);
-        // Advance the baseline NOW (before any heavy work / per-client push) so a later
-        // failure can't stall new-block or vBytesPerSecond detection.
-        $last['tip'] = $tip; $last['mvsize'] = $mvsize; $last['mtime'] = $t;
+        // Advance the vBytesPerSecond baseline NOW (it must never stall on a later failure), but
+        // HOLD the tip baseline until the block payload is actually built. Advancing tip here too
+        // meant a transient block fetch failure dropped that block from the stream forever (the
+        // next tick saw tip==last['tip'] and never retried).
+        $last['mvsize'] = $mvsize; $last['mtime'] = $t;
 
         $blockExt = null; $da = null;
         if ($newBlock || $firstTip) {
             $h = lx_block_hash_at($net, $tip);
             if ($h) { $blockExt = lx_ws_block_extended($net, $h); }
             $da = lx_difficulty_adjustment($net);
+            if ($blockExt !== null) { $last['tip'] = $tip; }   // only mark delivered once we have the payload
+        } else {
+            $last['tip'] = $tip;                                // tip unchanged: keep the baseline current
         }
 
         // RBF detection pass; collect events newer than what we last pushed.
@@ -426,7 +449,10 @@ while (true) {
                             if (!empty($atx['status']['confirmed'])) { $bAll[] = $atx; } else { $mAll[] = $atx; }
                         }
                     }
-                    if (count($c['seenAddrs']) > 2000) { $c['seenAddrs'] = array_slice($c['seenAddrs'], -1000, null, true); }
+                    // Trim floor must stay well ABOVE the max set returnable in one tick (20 tracked
+                    // addresses x ~25 newest-confirmed + their mempool txs), or trimmed-out entries
+                    // that are still returned every tick would be re-pushed as if new (duplicate rows).
+                    if (count($c['seenAddrs']) > 8000) { $c['seenAddrs'] = array_slice($c['seenAddrs'], -4000, null, true); }
                     if ($mAll || $bAll) { $push['multi-address-transactions'] = ['mempool' => $mAll, 'confirmed' => $bAll]; }
                 }
                 if ($c['trackMpTxids'] && $mpTxids !== null) {     // mempool txid delta stream

@@ -116,7 +116,7 @@ lx_head($net, [
         <div class="hero-eyebrow">Address &middot; <?= h(lx_spk_label($type)) ?></div>
         <div class="break mono addr-lg"><?= h($addr) ?></div>
         <div class="row mt-2"><button class="btn ghost sm" type="button" data-copy="<?= h($addr) ?>" aria-label="Copy address">Copy address</button></div>
-        <div class="row mt-2"><span class="badge soft"><?= h(lx_spk_label($type)) ?></span></div>
+        <div class="row mt-2"><span class="badge soft"><?= h(lx_spk_label($type)) ?></span><?= lx_address_label_badge($addr) ?></div>
       </div>
     </div>
     <div class="stat-grid mt-3">

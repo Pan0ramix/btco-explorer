@@ -28,6 +28,19 @@ $slug = null;
 foreach ($args as $a) { if (strpos($a, '--') !== 0) { $slug = $a; break; } }
 $nets = $slug ? [lx_net($slug)] : array_values(lx_networks());
 
+// Refuse to overlap. A full run can take a while (block-index backfill, and a UTXO-set scan on a
+// coinstatsindex-less node is minutes-long holding cs_main). Without this, cron firing again every
+// 5 min while a run is still going piles up processes that lock the shared cache DB and hammer the
+// node - starving the PHP-FPM workers that serve requests. Separate locks for --tick (light,
+// frequent) vs the full run so they never block each other.
+$lockPath = (($cdb = lx_config()['cache_db'] ?? null) ? dirname($cdb) : sys_get_temp_dir())
+    . '/lx-snapshot' . ($tickOnly ? '-tick' : '') . '.lock';
+$lockFp = @fopen($lockPath, 'c');
+if ($lockFp && !flock($lockFp, LOCK_EX | LOCK_NB)) {
+    fwrite(STDERR, "snapshot: another run is already in progress; exiting\n");
+    exit(0);
+}
+
 $n = 0;
 foreach ($nets as $net) {
     if (!$net) {
