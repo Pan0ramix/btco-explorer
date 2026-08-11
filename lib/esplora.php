@@ -1520,7 +1520,7 @@ function lx_electrum_reachable(array $net): bool
 function lx_address_index_fresh(array $net): bool
 {
     $tol = (int) (lx_config()['index_lag_tolerance'] ?? 3);
-    $verdict = cache_remember('idxfresh:' . $net['slug'], 10, function () use ($net, $tol) {
+    $verdict = cache_remember('idxfresh:' . $net['slug'], 30, function () use ($net, $tol) {
         // A down/hung electrs is already known + cached by the reachability probe
         // (server.ping, 10s TTL): do ZERO new electrs work, just fail open. The
         // downstream get_history/listunspent null -> 503 still covers the outage.

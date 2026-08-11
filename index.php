@@ -415,13 +415,13 @@ function lx_route_api(array $net, array $r, string $method): void
                 if (($r[2] ?? '') === '') {
                     // bare /blocks/tip -> tip block object (mempool.space compat)
                     $blk = lx_esplora_block($net, lx_tip_hash($net));
-                    $blk ? json_out($blk) : api_error('Not found', 404);
+                    $blk ? json_out($blk, 200, 5) : api_error('Not found', 404);
                 }
                 api_error('Not found', 404);
             }
             // /blocks or /blocks/:start_height
             $start = isset($r[1]) && ctype_digit($r[1]) ? (int) $r[1] : null;
-            json_out(lx_recent_blocks($net, $start));
+            json_out(lx_recent_blocks($net, $start), 200, 5);
             // no break (json_out exits)
 
         // ---- block-height -------------------------------------------------
@@ -451,7 +451,7 @@ function lx_route_api(array $net, array $r, string $method): void
             }
             if ($sub === 'status') {
                 $st = lx_block_status($net, $hash);   // mutable: reorg can flip it
-                $st ? json_out($st) : api_error('Block not found', 404);
+                $st ? json_out($st, 200, 10) : api_error('Block not found', 404);
             }
             if ($sub === 'txids') {
                 $ids = lx_block_txids($net, $hash);
@@ -517,7 +517,7 @@ function lx_route_api(array $net, array $r, string $method): void
             }
             if ($sub === 'status') {
                 $tx = lx_find_tx($net, $txid);
-                $tx ? json_out($tx['status']) : api_error('Transaction not found', 404);
+                $tx ? json_out($tx['status'], 200, 5) : api_error('Transaction not found', 404);
             }
             if ($sub === 'outspends') {
                 // Expensive (resolves the spender of every spent output); throttle hardest.
@@ -565,21 +565,21 @@ function lx_route_api(array $net, array $r, string $method): void
             $sub = $r[2] ?? '';
             if ($sub === '') {
                 $st = lx_address_stats($net, $addr);
-                $st !== null ? json_out($st) : api_error('Address index unavailable', 503);
+                $st !== null ? json_out($st, 200, 5) : api_error('Address index unavailable', 503);
             }
             if ($sub === 'txs') {
                 $kind = $r[3] ?? '';
                 if ($kind === 'mempool') {
                     $t = lx_address_txs($net, $addr, 'mempool');
-                    $t !== null ? json_out($t) : api_error('Address index unavailable', 503);
+                    $t !== null ? json_out($t, 200, 5) : api_error('Address index unavailable', 503);
                 }
                 if ($kind === 'chain') {
                     $after = $r[4] ?? null;
                     $t = lx_address_txs($net, $addr, 'chain', $after);
-                    $t !== null ? json_out($t) : api_error('Address index unavailable', 503);
+                    $t !== null ? json_out($t, 200, 5) : api_error('Address index unavailable', 503);
                 }
                 $t = lx_address_txs($net, $addr, 'all');
-                $t !== null ? json_out($t) : api_error('Address index unavailable', 503);
+                $t !== null ? json_out($t, 200, 5) : api_error('Address index unavailable', 503);
             }
             if ($sub === 'utxo') {
                 $u = lx_address_utxos($net, $addr);
@@ -598,20 +598,20 @@ function lx_route_api(array $net, array $r, string $method): void
             // null result = electrs unavailable (down / resyncing) -> 503, never a fake empty.
             if ($sub === '') {
                 $st = lx_scripthash_stats($net, $sh);
-                $st !== null ? json_out($st) : api_error('Address index unavailable', 503);
+                $st !== null ? json_out($st, 200, 5) : api_error('Address index unavailable', 503);
             }
             if ($sub === 'txs') {
                 $kind = $r[3] ?? '';
                 if ($kind === 'mempool') {
                     $t = lx_scripthash_txs($net, $sh, 'mempool');
-                    $t !== null ? json_out($t) : api_error('Address index unavailable', 503);
+                    $t !== null ? json_out($t, 200, 5) : api_error('Address index unavailable', 503);
                 }
                 if ($kind === 'chain') {
                     $t = lx_scripthash_txs($net, $sh, 'chain', $r[4] ?? null);
-                    $t !== null ? json_out($t) : api_error('Address index unavailable', 503);
+                    $t !== null ? json_out($t, 200, 5) : api_error('Address index unavailable', 503);
                 }
                 $t = lx_scripthash_txs($net, $sh, 'all');
-                $t !== null ? json_out($t) : api_error('Address index unavailable', 503);
+                $t !== null ? json_out($t, 200, 5) : api_error('Address index unavailable', 503);
             }
             if ($sub === 'utxo') {
                 $u = lx_scripthash_utxos($net, $sh);
@@ -626,7 +626,7 @@ function lx_route_api(array $net, array $r, string $method): void
                 json_out(lx_esplora_mempool($net), 200, 5);
             }
             if ($sub === 'txids') {
-                json_out(lx_mempool_txids($net));
+                json_out(lx_mempool_txids($net), 200, 5);
             }
             if ($sub === 'recent') {
                 json_out(lx_mempool_recent($net), 200, 5);
@@ -639,7 +639,7 @@ function lx_route_api(array $net, array $r, string $method): void
 
         case 'v1':
             if (($r[1] ?? '') === 'fees' && ($r[2] ?? '') === 'recommended') {
-                json_out(lx_fees_recommended($net));
+                json_out(lx_fees_recommended($net), 200, 5);
             }
             if (($r[1] ?? '') === 'fees' && ($r[2] ?? '') === 'mempool-blocks') {
                 json_out(lx_mempool_blocks_api($net), 200, 5);
@@ -649,10 +649,10 @@ function lx_route_api(array $net, array $r, string $method): void
             }
             if (($r[1] ?? '') === 'validate-address') {
                 $addr = $r[2] ?? '';
-                json_out(lx_validate_address($net, $addr));
+                json_out(lx_validate_address($net, $addr), 200, 86400);
             }
             if (($r[1] ?? '') === 'difficulty-adjustment') {
-                json_out(lx_difficulty_adjustment($net));
+                json_out(lx_difficulty_adjustment($net), 200, 60);
             }
             if (($r[1] ?? '') === 'difficulty-history') {
                 json_out(lx_difficulty_epochs($net, 24), 200, 300);

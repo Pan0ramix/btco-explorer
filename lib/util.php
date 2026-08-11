@@ -27,6 +27,23 @@ function lx_cors(): void
 }
 
 /**
+ * Emit a Cache-Control an edge (Cloudflare) can act on. s-maxage is the edge TTL;
+ * stale-while-revalidate lets the edge serve a just-expired body INSTANTLY while it
+ * refreshes ONE copy in the background - so a polling storm on a hot key collapses to
+ * a single origin fetch per edge per TTL instead of a synchronous herd hitting
+ * ElectrumX/RPC. Liveliness is set per endpoint by $cache itself (a few seconds for
+ * live data, a day for immutable-by-hash bodies), so honoring it never over-staleness.
+ */
+function lx_cache_control(int $cache): void
+{
+    if ($cache <= 0) {
+        return;   // uncacheable (default): errors, per-user or index-unavailable bodies
+    }
+    $swr = max($cache, 30);   // burst shield: hot keys still refresh within $cache; only sparse keys ever serve stale
+    header('Cache-Control: public, max-age=' . $cache . ', s-maxage=' . $cache . ', stale-while-revalidate=' . $swr);
+}
+
+/**
  * Send a JSON response (Esplora bodies) and exit. $cache > 0 adds a
  * Cache-Control max-age (seconds) so an edge/proxy can absorb polling bursts on
  * hot, cheap endpoints; 0 leaves the response uncacheable (the default).
@@ -37,9 +54,7 @@ function json_out($data, int $status = 200, int $cache = 0): void
         http_response_code($status);
         lx_cors();
         header('Content-Type: application/json; charset=utf-8');
-        if ($cache > 0) {
-            header('Cache-Control: public, max-age=' . $cache . ', s-maxage=' . $cache);   // distinct edge (Cloudflare) TTL
-        }
+        lx_cache_control($cache);
     }
     echo json_encode($data, JSON_UNESCAPED_SLASHES);
     exit;
@@ -54,9 +69,7 @@ function text_out(string $body, int $status = 200, string $ctype = 'text/plain',
         // charset only applies to text/*; binary (/raw) is application/octet-stream.
         $charset = stripos($ctype, 'text/') === 0 ? '; charset=utf-8' : '';
         header('Content-Type: ' . $ctype . $charset);
-        if ($cache > 0) {
-            header('Cache-Control: public, max-age=' . $cache . ', s-maxage=' . $cache);   // distinct edge (Cloudflare) TTL
-        }
+        lx_cache_control($cache);
     }
     echo $body;
     exit;
