@@ -24,7 +24,7 @@ if (PHP_SAPI !== 'cli') {
     exit("cli only\n");
 }
 require dirname(__DIR__) . '/lib/bootstrap.php';
-require dirname(__DIR__) . '/lib/ws.php';
+require_once dirname(__DIR__) . '/lib/ws.php';   // bootstrap.php already require_once's this; guard against a double-load fatal
 error_reporting(E_ALL & ~E_DEPRECATED);
 
 $slug = $argv[1] ?? 'ltc-mainnet';

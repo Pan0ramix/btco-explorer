@@ -98,6 +98,16 @@ return [
     // 'version'    => '1.0.0',   // reported as `version` by /api/v1/backend-info
     // 'git_commit' => 'abc1234',  // reported as `gitCommit` by /api/v1/backend-info
 
+    // UTXO-set summary card on the /node page. Litecoin (Core 0.21 base) has NO
+    // coinstatsindex, so the gettxoutsetinfo scan behind it ALWAYS walks the whole
+    // chainstate for MINUTES, holding cs_main - which blocks every other node RPC
+    // (blocks, tx, mempool, the health probe), so the entire explorer reads "down"
+    // for the duration. OFF by default for that reason. Set true only if you want the
+    // card and accept a multi-minute node-RPC stall on refresh (at most every 6h). The
+    // rich-list `dumptxoutset` build carries the same cs_main-lock cost, so schedule
+    // that cron off-peak. Leaving this false affects nothing else.
+    'utxo_set_warm' => false,
+
     // Canonical host for absolute URLs (OG tags, sitemap), and the fallback for
     // an untrusted Host header.
     'canonical_host' => 'litecoinexplorer.org',

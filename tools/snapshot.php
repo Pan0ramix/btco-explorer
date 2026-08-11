@@ -76,7 +76,12 @@ foreach ($nets as $net) {
     }
     // UTXO: warm the UTXO-set summary (gettxoutsetinfo scans the chainstate) so
     // the Node page reads a cached value instead of computing it on request.
-    if (($net['kind'] ?? 'utxo') === 'utxo' && function_exists('lx_txoutset_refresh')) {
+    // OFF by default: Litecoin has no coinstatsindex, so gettxoutsetinfo ALWAYS walks
+    // the whole chainstate for minutes, holding cs_main and blocking ALL node RPC - the
+    // whole explorer reads "down" for the duration. Opt in with 'utxo_set_warm' => true
+    // (refreshed at most every 6h); `snapshot.php --utxo` still forces a one-off scan.
+    $warmUtxo = $forceUtxo || (bool) (lx_config()['utxo_set_warm'] ?? false);
+    if ($warmUtxo && ($net['kind'] ?? 'utxo') === 'utxo' && function_exists('lx_txoutset_refresh')) {
         $t0 = microtime(true);
         $u = lx_txoutset_refresh($net, $forceUtxo);
         $note = $forceUtxo ? ' in ' . round(microtime(true) - $t0, 1) . 's' : '';
