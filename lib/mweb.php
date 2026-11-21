@@ -34,7 +34,7 @@ const LX_MWEB_MAX_RANGE = 30;
 /** True iff MWEB features apply to this network and are enabled in config. */
 function lx_mweb_enabled(array $net): bool
 {
-    if (($net['coin'] ?? '') !== 'ltc') {
+    if (($net['coin'] ?? '') !== 'btco') {
         return false;
     }
     $flag = $net['mweb']['enabled'] ?? false;
@@ -61,11 +61,16 @@ function lx_mweb_active(array $net): array
         if (!is_array($c)) {
             return ['height' => 0, 'hash' => '', 'chain' => '', 'active' => false];
         }
+        $height = (int) ($c['blocks'] ?? 0);
+        $hash = (string) ($c['bestblockhash'] ?? '');
+        $header = $height >= lx_mweb_activation($net) && is_txid($hash)
+            ? lx_rpc_soft($net, 'getblockheader', [$hash, true])
+            : null;
         return [
-            'height' => (int) ($c['blocks'] ?? 0),
-            'hash'   => (string) ($c['bestblockhash'] ?? ''),
+            'height' => $height,
+            'hash'   => $hash,
             'chain'  => (string) ($c['chain'] ?? ''),
-            'active' => !empty($c['softforks']['mweb']['active']),
+            'active' => isset($header['mweb_header']),
         ];
     });
 }
@@ -872,33 +877,20 @@ function lx_mweb_live_snapshot(array $net): array
 }
 
 /**
- * Parse the MWEB extension-block header counts for one block from `getblock
- * <hash> 2` -> `.mweb`. Note the field semantics observed on litecoind: num_txos
- * is CUMULATIVE (the append-only confidential output set, non-zero even when this
- * block adds none) while num_kernels is PER-BLOCK (the count of transaction
- * kernels in this block; 0 when the block carries no MWEB activity).
- *
- * The `.mweb` object only appears at verbosity 2, which is heavy and 500s on
- * some builds, so this is best-effort: any RPC failure or unrecognised shape
- * returns null and the caller hides the stat. Returns
- * ['kernels' => int, 'outputs' => int|null] or null.
+ * Read the MWEB counters from the block header. Transaction output count is
+ * cumulative and kernel count describes the current extension block.
  */
 function lx_mweb_ext_counts(array $net, string $hash): ?array
 {
-    // getblock verbosity 2 is heavy and 500s on some litecoind builds; a transport
-    // error or non-JSON 500 can propagate out of lx_rpc_soft, so guard it here and
-    // hide the stat rather than take down the whole block/MWEB page.
     try {
-        $b = lx_rpc_soft($net, 'getblock', [$hash, 2]);
+        $b = lx_rpc_soft($net, 'getblockheader', [$hash, true]);
     } catch (Throwable $e) {
         return null;
     }
-    if (!is_array($b) || empty($b['mweb']) || !is_array($b['mweb'])) {
-        return null;   // pre-activation, or a build without the verbosity-2 .mweb object
+    $m = $b['mweb_header'] ?? null;
+    if (!is_array($m)) {
+        return null;
     }
-    $m = $b['mweb'];
-    // Field names differ slightly across builds; accept the known spellings and
-    // only trust a numeric scalar (the bare `kernels`/`outputs` keys are arrays).
     $pick = function (array $src, array $keys) {
         foreach ($keys as $k) {
             if (isset($src[$k]) && is_numeric($src[$k])) {

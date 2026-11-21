@@ -1,0 +1,32 @@
+# Linux host networking keeps the node RPC and index on loopback.
+services:
+  explorer:
+    build: .
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      BTCO_NETWORK: ${BTCO_NETWORK:-mainnet}
+      BTCO_RPC_URL: ${BTCO_RPC_URL:-http://127.0.0.1:19711/}
+      BTCO_RPC_USER: ${BTCO_RPC_USER:?Set BTCO_RPC_USER}
+      BTCO_RPC_PASSWORD: ${BTCO_RPC_PASSWORD:?Set BTCO_RPC_PASSWORD}
+      EXPLORER_HOST: ${EXPLORER_HOST:-localhost:8080}
+    volumes:
+      - explorer-cache:/var/www/html/db
+  electrumx:
+    build: ./electrumx
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      COIN: BitcoinOil
+      NET: ${BTCO_NETWORK:-mainnet}
+      DAEMON_URL: ${BTCO_ELECTRUM_DAEMON_URL:?Set BTCO_ELECTRUM_DAEMON_URL}
+      DB_ENGINE: leveldb
+      DB_DIRECTORY: /data
+      SERVICES: tcp://127.0.0.1:50001
+      PEER_DISCOVERY: "off"
+      CACHE_MB: ${BTCO_INDEX_CACHE_MB:-256}
+    volumes:
+      - electrum-index:/data
+volumes:
+  explorer-cache:
+  electrum-index:

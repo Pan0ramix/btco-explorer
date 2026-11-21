@@ -17,7 +17,7 @@ foreach ($mem['fee_histogram'] as $band) {
 }
 $proj    = lx_projected_blocks($net, 8);
 $hist    = function_exists('lx_stats_series') ? lx_stats_series($net, 48) : [];   // mempool/fee time-series (snapshot cron)
-$spacing = $net['coin'] === 'ltc' ? 150 : 600;   // target block time, seconds
+$spacing = $net['spacing'];   // target block time, seconds
 
 $ogNext = $fees ? ' · next block ' . commas($fees['fastestFee']) . ' sat/vB' : '';
 lx_head($net, [

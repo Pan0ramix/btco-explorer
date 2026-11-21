@@ -70,11 +70,15 @@ $bh = (int) $blk['height'];
       <tr><th>Weight</th><td><?= commas($blk['weight']) ?> WU</td></tr>
       <tr><th>Merkle root</th><td class="mono break"><?= h($blk['merkle_root']) ?></td></tr>
       <tr><th>Difficulty</th><td><?php $d = (float) $blk['difficulty']; echo h($d >= 1 ? number_format($d, 3) : rtrim(rtrim(sprintf('%.8f', $d), '0'), '.')); ?></td></tr>
+      <tr><th>Mining</th><td><?= !empty($blk['auxpow']) ? 'AuxPoW / merge mined' : 'Native SHA-256d' ?></td></tr>
+      <?php if (isset($blk['mweb_amount_sat'])): ?>
+      <tr><th>MWEB balance</th><td><?= lx_amount_el($net, $blk['mweb_amount_sat']) ?></td></tr>
+      <?php endif; ?>
       <tr><th>Nonce</th><td class="mono"><?= commas($blk['nonce']) ?></td></tr>
       <tr><th>Bits</th><td class="mono">0x<?= h(dechex($blk['bits'])) ?></td></tr>
       <tr><th>Version</th><td class="mono">0x<?= h(sprintf('%08x', (int) $blk['version'])) ?></td></tr>
       <?php if (is_string($hdrHex) && $hdrHex !== ''): ?>
-      <tr><th>Header hex</th><td><details><summary style="cursor:pointer;color:var(--muted)">80-byte header</summary><div class="mono break" style="margin-top:6px"><?= h($hdrHex) ?> <button class="btn ghost sm" type="button" data-copy="<?= h($hdrHex) ?>" aria-label="Copy block header hex">Copy</button></div></details></td></tr>
+      <tr><th>Header hex</th><td><details><summary style="cursor:pointer;color:var(--muted)">Serialized header</summary><div class="mono break" style="margin-top:6px"><?= h($hdrHex) ?> <button class="btn ghost sm" type="button" data-copy="<?= h($hdrHex) ?>" aria-label="Copy block header hex">Copy</button></div></details></td></tr>
       <?php endif; ?>
       <?php if (!empty($blk['previousblockhash'])): ?>
       <tr><th>Previous</th><td class="mono break"><a class="addr" href="<?= h(lx_block_href($net, $blk['previousblockhash'])) ?>"><?= h($blk['previousblockhash']) ?></a></td></tr>

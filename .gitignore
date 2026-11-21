@@ -17,3 +17,5 @@ db/
 *.bak
 *.orig
 .DS_Store
+
+.env

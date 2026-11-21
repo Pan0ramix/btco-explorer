@@ -1,7 +1,7 @@
 {
-  "name": "Litecoin Explorer",
-  "short_name": "Litecoin Explorer",
-  "description": "Litecoin (LTC) block explorer with first-class MWEB support. Blocks, transactions, addresses, mempool, mining and fees, live from the node.",
+  "name": "BitcoinOil Explorer",
+  "short_name": "BitcoinOil Explorer",
+  "description": "BitcoinOil (BTCO) block explorer with first-class MWEB support. Blocks, transactions, addresses, mempool, mining and fees, live from the node.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,8 +10,6 @@
   "lang": "en",
   "categories": ["utilities", "finance"],
   "icons": [
-    { "src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
     { "src": "/assets/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

@@ -270,11 +270,11 @@ function lx_mining_blocks_sizesweights_api(array $net, string $period): array
 function lx_backend_info_api(array $net): array
 {
     return [
-        'hostname'  => (string) (lx_config()['canonical_host'] ?? ($_SERVER['SERVER_NAME'] ?? 'litecoinexplorer.org')),
+        'hostname'  => (string) (lx_config()['canonical_host'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost')),
         'version'   => (string) (lx_config()['version'] ?? '1.0.0'),
         'gitCommit' => (string) (lx_config()['git_commit'] ?? ''),
         'lightning' => false,                    // Litecoin instance: Lightning is off
-        'backend'   => 'litecoinexplorer',
+        'backend'   => 'btco-explorer',
         'network'   => (string) ($net['network'] ?? 'mainnet'),
     ];
 }
@@ -375,7 +375,7 @@ function lx_block_by_timestamp_api(array $net, int $ts): ?array
     $tipHash = lx_block_hash_at($net, $tip);
     $tipHdr  = $tipHash ? lx_rpc_soft($net, 'getblockheader', [$tipHash, true]) : null;
     $tipTime = is_array($tipHdr) ? (int) ($tipHdr['time'] ?? time()) : time();
-    $spacing = ($net['coin'] ?? '') === 'ltc' ? 150 : 600;
+    $spacing = $net['spacing'];
     $est = (int) max(0, min($tip, $tip - intdiv($tipTime - $ts, $spacing)));
     for ($iter = 0; $iter < 3; $iter++) {
         $hash = lx_block_hash_at($net, $est);

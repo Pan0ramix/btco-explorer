@@ -9,7 +9,7 @@
 $index   = (int) ($GLOBALS['mempool_block_index'] ?? 0);
 $proj    = lx_projected_blocks($net, 8);
 $base    = lx_u($net);
-$spacing = $net['coin'] === 'ltc' ? 150 : 600;
+$spacing = $net['spacing'];
 
 if (!$proj || $index >= count($proj)) {
     lx_head($net, ['title' => 'Projected block - ' . $net['label'] . ' Explorer']);

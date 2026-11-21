@@ -42,7 +42,7 @@ function lx_mwebscan_api_base(array $net): ?string
 /** True when the MWEBscan overlay can be fetched for this network. */
 function lx_mwebscan_enabled(array $net): bool
 {
-    return lx_mwebscan_network($net) !== null
+    return ($net['coin'] ?? '') === 'ltc' && lx_mwebscan_network($net) !== null
         && lx_mwebscan_api_base($net) !== null
         && function_exists('curl_init');
 }

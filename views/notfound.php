@@ -14,7 +14,7 @@ $net = $net ?? ($GLOBALS['net'] ?? null);
 $query = $GLOBALS['search_query'] ?? null;
 
 if (is_array($net)) {
-    lx_head($net, ['title' => 'Not found - Litecoin Explorer']);
+    lx_head($net, ['title' => 'Not found - BitcoinOil Explorer']);
     ?>
     <div class="card">
       <div class="card-b">
@@ -43,12 +43,12 @@ if (is_array($net)) {
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/app.css?v=55">
-<title>Not found - Litecoin Explorer</title></head>
+<title>Not found - BitcoinOil Explorer</title></head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
 <nav>
   <div class="nav-inner">
-    <a class="brand" href="/"><img class="brand-ico" src="/assets/favicon.svg" alt=""><span>Litecoin<b>Explorer</b></span></a>
+    <a class="brand" href="/"><img class="brand-ico" src="/assets/favicon.svg" alt=""><span>BitcoinOil <b>Explorer</b></span></a>
     <button type="button" class="nav-burger" aria-label="Toggle menu" aria-expanded="false" aria-controls="nav-links"><?= lx_icon('menu', 'ico') ?></button>
     <div class="nav-links" id="nav-links">
       <a href="/docs"><?= lx_icon('code') ?>API</a>

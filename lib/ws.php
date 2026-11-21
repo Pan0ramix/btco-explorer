@@ -106,7 +106,7 @@ function lx_ws_init(array $net, array $wants): array
     }
     $out['backend']     = 'electrum';
     $out['backendInfo'] = [
-        'hostname'  => lx_config()['canonical_host'] ?? 'litecoinexplorer.org',
+        'hostname'  => lx_config()['canonical_host'] ?? 'localhost',
         'version'   => 'litecoinexplorer',
         'gitCommit' => '',
         'lightning' => false,

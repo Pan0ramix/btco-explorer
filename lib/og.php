@@ -233,7 +233,7 @@ function lx_og_render(array $net, string $type, string $id): ?array
             imageline($im, $W - 10, $yy, $W - 1, $yy, imagecolorallocate($im, $c[0], $c[1], $c[2]));
         }
 
-        imagettftext($im, 33, 0, $padL, 112, $white, $fontB, 'Litecoin Explorer');
+        imagettftext($im, 33, 0, $padL, 112, $white, $fontB, 'BitcoinOil Explorer');
         // chain label, right-aligned
         $chain = $net['label'];
         $bb = imagettfbbox(26, 0, $fontR, $chain);
@@ -246,7 +246,7 @@ function lx_og_render(array $net, string $type, string $id): ?array
             imagettftext($im, 32, 0, $padL, $y, $muted, $fontR, lx_og_fit((string) $ln, 32, $fontR, $maxW));
             $y += 58;
         }
-        imagettftext($im, 26, 0, $padL, $H - 58, $muted, $fontR, 'litecoinexplorer.org');
+        imagettftext($im, 26, 0, $padL, $H - 58, $muted, $fontR, 'localhost');
 
         ob_start();
         imagepng($im);

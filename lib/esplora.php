@@ -814,6 +814,8 @@ function lx_esplora_block(array $net, string $hash): ?array
         'nonce'             => (int) $b['nonce'],
         'bits'              => isset($b['bits']) ? (int) hexdec($b['bits']) : 0,
         'difficulty'        => (float) ($b['difficulty'] ?? 0),
+        'auxpow'            => isset($b['auxpow']),
+        'mweb_amount_sat'   => isset($b['mweb_amount']) ? (int) $b['mweb_amount'] : null,
     ];
     // getblock verbosity 1 already returns the txid list; warm that cache too so a
     // following lx_block_txids (block page tx list, WS path) doesn't refetch the block.
@@ -1714,7 +1716,7 @@ function lx_difficulty_adjustment(array $net): array
     return cache_remember('diffadj:' . $net['slug'], 60, function () use ($net) {
         $height = (int) lx_rpc($net, 'getblockcount');
         $epoch = 2016;
-        $targetSpacing = $net['coin'] === 'ltc' ? 150 : 600; // seconds per block
+        $targetSpacing = $net['spacing']; // seconds per block
         $epochStart = intdiv($height, $epoch) * $epoch;
         $nextRetargetHeight = $epochStart + $epoch;
         $blocksInEpoch = $height - $epochStart;           // 0..2015
@@ -2545,7 +2547,7 @@ function lx_projected_block_txlist(array $net, int $index, int $limit = 60): arr
  */
 function lx_tx_eta(array $net, float $feeRate): string
 {
-    $spacing = ($net['coin'] ?? '') === 'ltc' ? 150 : 600;
+    $spacing = $net['spacing'];
     $proj = lx_projected_blocks($net, 8);
     if (!$proj) {
         return '~ next block · ~' . round($spacing / 60) . ' min';   // ~empty mempool
@@ -2740,7 +2742,7 @@ function lx_difficulty_series(array $net, int $points = 24, int $span = 12000): 
         }
         $hdrs = lx_rpc_batch($net, $hdrCalls);
 
-        $spacing = $net['coin'] === 'ltc' ? 150 : 600;
+        $spacing = $net['spacing'];
         $out = [];
         foreach ($idxMap as $k => $i) {
             $hdr = $hdrs[$k];

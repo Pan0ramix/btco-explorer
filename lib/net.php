@@ -19,37 +19,24 @@
 /** Static chain parameters, keyed by network slug. */
 function lx_net_params(): array
 {
+    $main = [
+        'slug' => 'btco-mainnet', 'kind' => 'utxo', 'coin' => 'btco',
+        'network' => 'mainnet', 'label' => 'BitcoinOil', 'short' => 'BitcoinOil',
+        'ticker' => 'BTCO', 'unit' => 'BTCO', 'decimals' => 8,
+        'accent' => '#4c84d6', 'p2pkh' => 26, 'p2sh' => 25,
+        'bech32' => 'btco', 'mweb_hrp' => 'btcomweb',
+        'mweb_activation' => 157500, 'has_taproot' => true,
+        'spacing' => 360,
+        'genesis' => '00000000baccc78f2852f3943bb19ff89df6d374252e72f6b487e68c0d839d54',
+    ];
     return [
-        'ltc-mainnet' => [
-            'slug'        => 'ltc-mainnet',
-            'kind'        => 'utxo',          // utxo (selects data layer + views)
-            'coin'        => 'ltc',
-            'network'     => 'mainnet',       // drives MWEBscan overlay + address codec
-            'path'        => 'ltc-mainnet',   // vestigial: root-level URLs (lx_u returns '')
-            'label'       => 'Litecoin',
-            'short'       => 'Litecoin',
-            'ticker'      => 'LTC',
-            'unit'        => 'LTC',
-            'decimals'    => 8,
-            'accent'      => '#4c84d6',       // Litecoin blue
-            // address codec params (Litecoin mainnet, per Core chainparams.cpp)
-            'p2pkh'       => 0x30,            // 48 -> 'L'
-            'p2sh'        => 0x32,            // 50 -> 'M' (current default)
-            'p2sh_alt'    => 0x05,            // 5  -> '3' (legacy Bitcoin-style, still valid)
-            'bech32'      => 'ltc',           // native segwit: ltc1...
-            'mweb_hrp'    => 'ltcmweb',       // MWEB stealth-address hrp: ltcmweb1... (display badge)
-            'mweb_activation' => 2265984,     // MWEB soft-fork activation height (2022-05-19)
-            'has_taproot' => true,            // Taproot active on LTC mainnet (May 2022, same upgrade as MWEB)
-            // external cross-reference explorer (for "view elsewhere" links)
-            'extern_tx'   => 'https://litecoinspace.org/tx/',
-            'extern_block'=> 'https://litecoinspace.org/block/',
-            'extern_name' => 'litecoinspace.org',
-            // MWEBscan analysis overlay (round-trip linking / privacy scoring / entity
-            // attribution) joined onto our boundary data by txid:vout. The public API is
-            // rate-limited (60/min/IP) - override in config.php['mwebscan_api'] with a
-            // keyed or allow-listed instance for production explorer traffic.
-            'mwebscan_api' => 'https://mwebscan.com/api',
-        ],
+        'btco-mainnet' => $main,
+        'btco-testnet' => array_replace($main, [
+            'slug' => 'btco-testnet', 'network' => 'testnet', 'label' => 'BitcoinOil Testnet',
+            'p2pkh' => 51, 'p2sh' => 50, 'bech32' => 'tbtco', 'mweb_hrp' => 'tbtcomweb',
+            'mweb_activation' => 110,
+            'genesis' => '00000000f130184486dad044d14fff1d39665f09551dfafccd5a8f938c05df57',
+        ]),
     ];
 }
 
@@ -107,7 +94,7 @@ function lx_networks(): array
 function lx_base_url(): string
 {
     $cfg = lx_config();
-    $canonical = $cfg['canonical_host'] ?? 'litecoinexplorer.org';
+    $canonical = $cfg['canonical_host'] ?? 'localhost';
     // Only reflect a Host we trust into canonical/OG URLs. An allowlist
     // prevents canonical/cache poisoning from a spoofed Host header.
     $allowed = array_merge([$canonical], $cfg['allowed_hosts'] ?? []);

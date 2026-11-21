@@ -58,8 +58,8 @@ foreach ($nets as $n) {
 $allUp = $rows ? array_reduce($rows, function ($c, $r) { return $c && $r['up']; }, true) : false;
 ?>
 <?php lx_head($net, [
-    'title' => 'Status - Litecoin Explorer',
-    'desc'  => 'Live backend health for Litecoin Explorer: node RPC, Electrum index and MWEB index.',
+    'title' => 'Status - BitcoinOil Explorer',
+    'desc'  => 'Live backend health for BitcoinOil Explorer: node RPC, Electrum index and MWEB index.',
 ]); ?>
 <h1>Status</h1>
 <div class="card hero"><div class="card-b between">

@@ -14,6 +14,8 @@
 function lx_pool_map(): array
 {
     static $m = [
+        'rodb2008.com'    => 'RodB2008',
+        'bowserlab'       => 'Bowserlab',
         'foundry'         => 'Foundry USA',
         'antpool'         => 'AntPool',
         'f2pool'          => 'F2Pool',

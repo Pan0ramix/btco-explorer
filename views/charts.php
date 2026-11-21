@@ -238,7 +238,7 @@ if (count($priceRows) >= 2 && $tipH > 0 && $isLtc) {
     $nowT = time();
     foreach ($priceRows as $pr) {
         $t = (int) $pr['t'];
-        $hAtT = max(0, $tipH - (int) (($nowT - $t) / 150));   // ~150s per LTC block back from the tip
+        $hAtT = max(0, $tipH - (int) (($nowT - $t) / $net['spacing']));   // ~150s per LTC block back from the tip
         $mc = $minedAt($hAtT) / 100000000 * (float) $pr['p'];
         $mcapRows[]   = ['t' => $t, 'm' => $mc];
         $mcapLabels[] = gmdate('M j, Y', $t) . ' · ' . $psym . lx_num_compact($mc);
@@ -462,7 +462,7 @@ $hasAny = (count($hist) >= 2) || (count($dser) >= 2) || !empty($stats) || count(
         $actRows[]   = ['day' => $d, 'active' => $a['active'], 'cdd' => $a['cdd'], 'txd' => $a['txs'], 'med' => $medSat, 'new' => $newA];
         $actLabels[] = $lab;
         $actTips[] = lx_tip_json($lab, [['c' => '#6b86ff', 'k' => 'Active', 'v' => commas((int) round($a['active'])) . ' addrs']]);
-        $cddTips[] = lx_tip_json($lab, [['c' => '#e07a3e', 'k' => 'Destroyed', 'v' => lx_num_compact($a['cdd']) . ' LTC-days']]);
+        $cddTips[] = lx_tip_json($lab, [['c' => '#e07a3e', 'k' => 'Destroyed', 'v' => lx_num_compact($a['cdd']) . ' BTCO-days']]);
         $txdTips[] = lx_tip_json($lab, [['c' => '#6b86ff', 'k' => 'Txs', 'v' => commas((int) round($a['txs']))]]);
         $newTips[] = lx_tip_json($lab, [['c' => '#009E73', 'k' => 'New', 'v' => commas((int) round($newA)) . ' addrs']]);
         $medTips[] = lx_tip_json($lab, [
@@ -483,7 +483,7 @@ $hasAny = (count($hist) >= 2) || (count($dser) >= 2) || !empty($stats) || count(
   ]) ?></div>
 </div>
 <div class="card">
-  <div class="card-h"><span><?= lx_icon('zap') ?>Coin-days destroyed / day</span> <span class="sub">LTC-days &middot; economic activity</span></div>
+  <div class="card-h"><span><?= lx_icon('zap') ?>Coin-days destroyed / day</span> <span class="sub">BTCO-days &middot; economic activity</span></div>
   <div class="card-b"><?= lx_chart_area($actRows, 'day', 'cdd', 'Coin-days destroyed per day', $actLabels, [
       'yfmt' => 'lx_num_compact', 'xticks' => $actXticks, 'tips' => $cddTips, 'log' => $logScale, 'ma' => 7,
   ]) ?></div>

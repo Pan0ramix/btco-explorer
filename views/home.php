@@ -50,7 +50,7 @@ $proj  = lx_projected_blocks($net);
 
 $tipBlock = $blocks[0] ?? null;
 $diff     = $tipBlock ? (float) $tipBlock['difficulty'] : 0.0;
-$spacing  = $net['coin'] === 'ltc' ? 150 : 600;             // target seconds/block
+$spacing  = $net['spacing'];             // target seconds/block
 // Core's getnetworkhashps (work / actual time over ~120 blocks) is far steadier
 // than a single tip block's difficulty on min-difficulty testnets; fall back to
 // the difficulty estimate only if the node can't answer.
@@ -67,7 +67,7 @@ lx_head($net, [
     'og_image' => '/og/home.png',
 ]);
 
-// Live LTC price (best-effort; hides if the source is unavailable/disabled).
+// Live BTCO price (best-effort; hides if the source is unavailable/disabled).
 $ltcPriceNow = lx_price_now($net);                       // float|null
 $ltcChg      = $ltcPriceNow !== null ? lx_price_change($net) : null;
 $priceCode   = strtoupper(lx_price_config()['display']);

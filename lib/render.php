@@ -91,14 +91,14 @@ function lx_meta_social(string $title, string $desc, string $url, string $image 
     $t = h($title); $d = h($desc); $u = h($url); $i = h($img);
     return '<link rel="apple-touch-icon" href="/assets/icon-192.png">' . "\n"
         . '<meta property="og:type" content="website">' . "\n"
-        . '<meta property="og:site_name" content="Litecoin Explorer">' . "\n"
+        . '<meta property="og:site_name" content="BitcoinOil Explorer">' . "\n"
         . '<meta property="og:title" content="' . $t . '">' . "\n"
         . '<meta property="og:description" content="' . $d . '">' . "\n"
         . '<meta property="og:url" content="' . $u . '">' . "\n"
         . '<meta property="og:image" content="' . $i . '">' . "\n"
         . '<meta property="og:image:width" content="1200">' . "\n"
         . '<meta property="og:image:height" content="630">' . "\n"
-        . '<meta property="og:image:alt" content="Litecoin Explorer - Litecoin (LTC) block explorer">' . "\n"
+        . '<meta property="og:image:alt" content="BitcoinOil Explorer - Litecoin (BTCO) block explorer">' . "\n"
         . '<meta property="og:locale" content="en_US">' . "\n"
         . '<meta name="twitter:card" content="summary_large_image">' . "\n"
         . '<meta name="twitter:title" content="' . $t . '">' . "\n"
@@ -109,7 +109,7 @@ function lx_meta_social(string $title, string $desc, string $url, string $image 
 /** Brand accent (single source of truth for the site-wide --brand var): Litecoin blue. */
 function lx_brand_color(string $coin): string
 {
-    $m = ['ltc' => '#4c84d6'];
+    $m = ['btco' => '#4c84d6'];
     return isset($m[$coin]) ? $m[$coin] : '#4c84d6';
 }
 
@@ -164,7 +164,7 @@ function lx_head(array $net, array $opt = []): void
 <script type="application/ld+json"><?= json_encode([
     '@context' => 'https://schema.org',
     '@type'    => 'WebSite',
-    'name'     => 'Litecoin Explorer',
+    'name'     => 'BitcoinOil Explorer',
     'url'      => lx_base_url() . '/',
     'potentialAction' => [
         '@type'  => 'SearchAction',
@@ -178,7 +178,7 @@ function lx_head(array $net, array $opt = []): void
 <a class="skip-link" href="#main">Skip to content</a>
 <nav>
   <div class="nav-inner">
-    <a class="brand" href="<?= h($base) ?>/"><img class="brand-ico" src="/assets/favicon.svg" alt=""><span>Litecoin<b>Explorer</b></span></a>
+    <a class="brand" href="<?= h($base) ?>/"><img class="brand-ico" src="/assets/favicon.svg" alt=""><span>BitcoinOil <b>Explorer</b></span></a>
     <form class="search" action="<?= h($base) ?>/search" method="get" role="search">
       <input type="text" name="q" value="<?= h($q) ?>" placeholder="Search block, tx or address..." autocomplete="off" spellcheck="false" aria-label="Search">
       <button type="submit" class="btn sm" aria-label="Search">Search</button>
@@ -191,17 +191,11 @@ function lx_head(array $net, array $opt = []): void
       <a href="<?= h($base) ?>/mining"><?= lx_icon('cpu') ?>Mining</a>
       <?php if ($isUtxo): ?><a href="<?= h($base) ?>/charts"><?= lx_icon('trending-up') ?>Charts</a><?php endif; ?>
       <?php if ($isUtxo): ?><a href="<?= h($base) ?>/node"><?= lx_icon('hard-drive') ?>Node</a><?php endif; ?>
-      <?php if ($isUtxo): ?><a href="<?= h($base) ?>/richlist"><?= lx_icon('award') ?>Rich list</a><?php endif; ?>
-      <?php if ($isUtxo): ?><a href="<?= h($base) ?>/halving"><?= lx_icon('gift') ?>Halving</a><?php endif; ?>
       <?php if (lx_mweb_enabled($net)): ?><a href="<?= h($base) ?>/mweb"><?= lx_icon('mweb') ?>MWEB</a><?php endif; ?>
-      <a href="<?= h($base) ?>/tools"><?= lx_icon('tool') ?>Tools</a>
-      <?php if ($isUtxo): ?><a href="/docs"><?= lx_icon('code') ?>API</a><?php endif; ?>
-      <a href="/donate"><?= lx_icon('heart') ?>Donate</a>
       <div class="nav-ctl">
       <?php $ccys = function_exists('lx_price_config') ? lx_price_config()['currencies'] : []; if (count($ccys) > 1): $ccyDef = strtoupper(lx_price_config()['display']); ?>
       <select class="ccy-sel" id="ccy-sel" data-default="<?= h($ccyDef) ?>" aria-label="Display currency" title="Display currency"><?php foreach ($ccys as $cc): $ccU = strtoupper($cc); ?><option value="<?= h($ccU) ?>"<?= $ccU === $ccyDef ? ' selected' : '' ?>><?= h($ccU) ?></option><?php endforeach; ?></select>
       <?php endif; ?>
-      <select class="denom-sel" id="denom-sel" aria-label="Amount unit" title="Amount unit"><option value="ltc" selected>LTC</option><option value="mltc">mLTC</option><option value="lit">lit</option></select>
       <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle light / dark theme" title="Toggle theme"><?= lx_icon('sun', 'ico ico-sun') ?><?= lx_icon('moon', 'ico ico-moon') ?></button>
       </div>
     </div>
@@ -218,8 +212,8 @@ function lx_footer(): void
 <footer>
   <div class="foot-inner">
     <div class="foot-brand">
-      <a class="brand" href="/"><img class="brand-ico" src="/assets/favicon.svg" alt=""><span>Litecoin<b>Explorer</b></span></a>
-      <p class="foot-tag">Open-source Litecoin block explorer with first-class MWEB support, live from the node.</p>
+      <a class="brand" href="/"><img class="brand-ico" src="/assets/favicon.svg" alt=""><span>BitcoinOil <b>Explorer</b></span></a>
+      <p class="foot-tag">Open-source BitcoinOil block explorer with first-class MWEB support, live from the node.</p>
     </div>
     <div class="foot-cols" role="navigation" aria-label="Footer">
       <div class="foot-col">
@@ -228,30 +222,23 @@ function lx_footer(): void
         <a href="/mempool">Mempool</a>
         <a href="/mining">Mining</a>
         <a href="/charts">Charts</a>
-        <a href="/richlist">Rich list</a>
-        <a href="/halving">Halving</a>
         <a href="/mweb">MWEB</a>
       </div>
       <div class="foot-col">
         <h4>Developers</h4>
-        <a href="/docs">API</a>
         <a href="/node">Node</a>
-        <a href="/tools">Tools</a>
         <a href="/status">Status</a>
       </div>
       <div class="foot-col">
         <h4>Project</h4>
-        <a href="/donate">Donate</a>
-        <a class="ext" href="https://github.com/Tech1k/litecoinexplorer.org" target="_blank" rel="noopener">Source</a>
-        <a class="ext" href="https://litecoin.org" target="_blank" rel="noopener">Litecoin.org</a>
-        <a class="ext" href="https://testnetscan.com/ltc-testnet/" target="_blank" rel="noopener" title="Litecoin testnet explorer">Testnet</a>
+        <a class="ext" href="https://github.com/Pan0ramix/btco-explorer" target="_blank" rel="noopener">Source</a>
       </div>
     </div>
   </div>
   <div class="foot-bar">
     <div class="foot-bar-in">
-      <span>&copy; <?= gmdate('Y') ?> LitecoinExplorer &middot; <a class="ext" href="https://github.com/Tech1k/litecoinexplorer.org/blob/HEAD/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a></span>
-      <span>Made by <a class="ext" href="https://tech1k.com" target="_blank" rel="noopener">Tech1k</a> &middot; Litecoin, block by block</span>
+      <span>&copy; <?= gmdate('Y') ?> BitcoinOil Explorer &middot; <a class="ext" href="https://github.com/Pan0ramix/btco-explorer/blob/HEAD/LICENSE" target="_blank" rel="noopener">AGPL-3.0</a></span>
+      <span>Made by <a class="ext" href="https://tech1k.com" target="_blank" rel="noopener">Tech1k</a> &middot; BitcoinOil, block by block</span>
     </div>
   </div>
 </footer>
@@ -275,7 +262,7 @@ function lx_foot(array $net, array $opt = []): void
 
 // ---- formatting helpers ---------------------------------------------------
 
-/** Format integer satoshis as "0.00012340 LTC". */
+/** Format integer satoshis as "0.00012340 BTCO". */
 function lx_amount(array $net, int $sat): string
 {
     return sat_to_coin($sat) . ' ' . $net['unit'];
@@ -288,9 +275,9 @@ function lx_coin(int $sat): string
 }
 
 /**
- * A denomination-switchable amount. Server renders LTC (the default); app.js re-denominates
- * the data-sat to mLTC / litoshi when the nav unit selector is changed. $unit:
- *   true  - append the LTC ticker inline (prose / self-labeled amounts);
+ * A denomination-switchable amount. Server renders BTCO (the default); app.js re-denominates
+ * the data-sat to mBTCO / litoshi when the nav unit selector is changed. $unit:
+ *   true  - append the BTCO ticker inline (prose / self-labeled amounts);
  *   false - bare number (table cells); app.js appends the unit inline when switched;
  *   'ext' - bare number whose unit is carried by a sibling .denom-unit label (big-num stat
  *           cards); app.js must NOT append an inline unit or it would show twice.
@@ -1084,8 +1071,8 @@ function lx_tx_flow(array $net, array $tx, array $outspends = []): string
     $y0 = $pad; $waistH = $barH * 0.68; $wTop = $pad + ($barH - $waistH) / 2.0;
     $BLUE = 'url(#lx-flow-grad)'; $AMBER = '#e0a33a';
 
-    // Vertical fraction per segment WITH a floor, so a tiny output (e.g. a 2.6 LTC peg-out next
-    // to a 337k LTC HogEx supply) still gets a visible, clickable band instead of a sub-pixel
+    // Vertical fraction per segment WITH a floor, so a tiny output (e.g. a 2.6 BTCO peg-out next
+    // to a 337k BTCO HogEx supply) still gets a visible, clickable band instead of a sub-pixel
     // sliver. Fractions sum to 1 and are shared by the full-height and waist stacks so the
     // ribbons don't twist. The tooltip still shows the true value.
     $fracs = function (array $segs) {

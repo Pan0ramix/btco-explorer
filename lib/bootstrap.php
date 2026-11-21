@@ -1,6 +1,6 @@
 <?php
 /**
- * Litecoin Explorer bootstrap: loads config, sets the error handler, and pulls in
+ * BitcoinOil Explorer bootstrap: loads config, sets the error handler, and pulls in
  * the library. Included once by index.php before any routing.
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
@@ -11,12 +11,12 @@ if (!defined('LX_ROOT')) {
     define('LX_ROOT', dirname(__DIR__));
 }
 
-// Satoshi amounts (max supply 84,000,000 LTC = 8.4e15 sat) exceed a 32-bit int, where
+// Satoshi amounts (max supply 84,000,000 BTCO = 8.4e15 sat) exceed a 32-bit int, where
 // they would silently promote to float and lose precision. Require a 64-bit PHP build.
 if (PHP_INT_SIZE < 8) {
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
-    exit("Litecoin Explorer requires a 64-bit PHP build (satoshi amounts exceed 32-bit integers).\n");
+    exit("BitcoinOil Explorer requires a 64-bit PHP build (satoshi amounts exceed 32-bit integers).\n");
 }
 
 // ---- config ---------------------------------------------------------------
@@ -27,7 +27,7 @@ if (!is_file($lx_config_file)) {
     http_response_code(503);
     header('Retry-After: 120');
     header('Content-Type: text/plain; charset=utf-8');
-    echo "Litecoin Explorer is not configured. Copy config.example.php to config.php.\n";
+    echo "BitcoinOil Explorer is not configured. Copy config.example.php to config.php.\n";
     exit;
 }
 
@@ -80,7 +80,7 @@ if (LX_DEBUG) {
             }
             echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
                . '<meta name="viewport" content="width=device-width, initial-scale=1">'
-               . '<title>Temporarily unavailable | Litecoin Explorer</title>'
+               . '<title>Temporarily unavailable | BitcoinOil Explorer</title>'
                . '<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
                . 'background:#14161b;color:#e6e8ec;text-align:center;padding-top:72px;line-height:1.6}'
                . 'a{color:#6b86ff}</style></head><body>'

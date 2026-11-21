@@ -83,7 +83,7 @@ lx_head($net, ['title' => 'MWEB - ' . $net['label'] . ' Explorer']);
     <img src="/assets/mwebscan.png" alt="MWEBscan" style="height:46px;width:46px;border-radius:11px;flex:none">
     <div style="flex:1;min-width:210px">
       <div style="font-weight:600;color:var(--text)">MWEBscan: MWEB chain analysis &amp; privacy scoring</div>
-      <p class="muted sub" style="margin:.3rem 0 0;text-align:left">Litecoin Explorer maps the public peg boundary (peg-ins, peg-outs and supply) from its own node. Its sister project <b>MWEBscan</b> adds the analysis layer on top: round-trip linking, privacy scoring and entity attribution.</p>
+      <p class="muted sub" style="margin:.3rem 0 0;text-align:left">BitcoinOil Explorer maps the public peg boundary (peg-ins, peg-outs and supply) from its own node. Private transfer amounts and address histories are hidden by MWEB.</p>
     </div>
     <a class="btn" href="<?= h(lx_mwebscan_site($net)) ?>" target="_blank" rel="noopener" style="flex:none"><?= lx_icon('mweb') ?>Open MWEBscan</a>
   </div>
@@ -204,7 +204,7 @@ lx_head($net, ['title' => 'MWEB - ' . $net['label'] . ' Explorer']);
                 $prevS = $sv;
             }
         endif;
-        // Compact coin y-axis label (litoshi -> "1.790M LTC"): scale to k/M and
+        // Compact coin y-axis label (litoshi -> "1.790M BTCO"): scale to k/M and
         // pick decimals from the tick $step so a near-flat supply (~1.79M ± a few
         // thousand) shows the real variation instead of six identical "1.79M"
         // labels. Called with no $step (peg-flow) it keeps the 2-decimal form.
@@ -419,7 +419,7 @@ lx_head($net, ['title' => 'MWEB - ' . $net['label'] . ' Explorer']);
       <summary><?= lx_icon('eye-off') ?>What is public and what is private</summary>
       <div>
         <ul>
-          <li><b>Public on the canonical chain:</b> a peg-in's amount and the ordinary Litecoin address that funded it; a peg-out's amount and destination address; and the block's absolute MWEB supply (each HogEx <code>vout[0]</code>).</li>
+          <li><b>Public on the canonical chain:</b> a peg-in's amount and the ordinary BitcoinOil address that funded it; a peg-out's amount and destination address; and the block's absolute MWEB supply (each HogEx <code>vout[0]</code>).</li>
           <li><b>Confidential inside MWEB:</b> individual amounts (Pedersen commitments), ownership, and the transaction graph. Once value crosses the peg-in boundary, on-chain observers no longer see who pays whom or how much.</li>
           <li><b>The boundary is the weak point.</b> Privacy comes from what happens <em>between</em> a peg-in and a peg-out. The two public endpoints are where amounts and timing can still be correlated.</li>
         </ul>

@@ -22,6 +22,17 @@ $segs = array_values(array_filter(explode('/', trim($path, '/')), function ($s) 
 }));
 $segs = array_map('rawurldecode', $segs);
 
+if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
+    http_response_code(405);
+    header('Allow: GET, HEAD, OPTIONS');
+    exit;
+}
+$available = ['', 'blocks', 'block', 'block-height', 'tx', 'address', 'mempool',
+    'mempool-block', 'search', 'mweb', 'mining', 'charts', 'node', 'status', 'api', 'og'];
+if (!in_array($segs[0] ?? '', $available, true)) {
+    lx_not_found($method);
+}
+
 // ---- top-level, non-chain-scoped pages ------------------------------------
 
 // XML sitemap.
@@ -69,6 +80,15 @@ if ($net === null) {
 // Root-level routing: every path segment is part of the resource path (there is
 // no network slug prefix), so `/` -> home, `/block/…`, `/api/…`, etc.
 $rest = $segs;
+$genesis = cache_remember('genesis:' . $net['slug'] . ':' . hash('sha256', $net['rpc']['url']), 30, function () use ($net) {
+    return lx_rpc($net, 'getblockhash', [0], 5);
+});
+if ($genesis !== $net['genesis']) {
+    http_response_code(503);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'The node does not match the configured BitcoinOil network.';
+    exit;
+}
 
 // ---- API vs HTML ----------------------------------------------------------
 
