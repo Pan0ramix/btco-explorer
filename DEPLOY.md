@@ -53,7 +53,7 @@ verify the ASERT difficulty before it can use this server safely.
 5. From another network:
 
    ```bash
-   echo '{"id":1,"method":"blockchain.headers.subscribe","params":[]}' | timeout 10 openssl s_client -quiet -connect YOUR_HOST:50002
+   printf '%s\n' '{"id":0,"method":"server.version","params":["check","1.4"]}' '{"id":1,"method":"blockchain.headers.subscribe","params":[]}' | timeout 10 openssl s_client -quiet -connect YOUR_HOST:50002
    ```
 
    The reported height must match `bitcoinoil-cli getblockcount`.
