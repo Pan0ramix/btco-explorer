@@ -57,3 +57,18 @@
  class DogecoinTestnet(Dogecoin):
      NAME = "Dogecoin"
      SHORTNAME = "XDT"
+--- a/src/electrumx/server/session.py
++++ b/src/electrumx/server/session.py
+@@ -2022,9 +2022,10 @@
+             result.update(await self._merkle_proof(cp_height, last_height))
+ 
+         cursor = 0
+-        height = 0
++        height = start_height
++        base = self.db.header_offset(start_height)  # AuxPoW headers have variable length
+         while cursor < len(headers):
+-            next_cursor = self.db.header_offset(height + 1)
++            next_cursor = self.db.header_offset(height + 1) - base
+             header = headers[cursor:next_cursor]
+             result['headers'].append(header.hex())
+             cursor = next_cursor
