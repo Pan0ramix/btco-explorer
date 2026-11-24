@@ -1,0 +1,11 @@
+# Public Electrum server. Use together with compose.yaml:
+#   docker compose -f compose.yaml -f compose.electrum.yaml up -d electrumx
+services:
+  electrumx:
+    environment:
+      # Loopback stays plain TCP for the explorer; wallets use TLS on 50002.
+      SERVICES: tcp://127.0.0.1:50001,ssl://:50002
+      SSL_CERTFILE: /certs/fullchain.pem
+      SSL_KEYFILE: /certs/privkey.pem
+    volumes:
+      - ${BTCO_ELECTRUM_CERTS:?Set BTCO_ELECTRUM_CERTS}:/certs:ro

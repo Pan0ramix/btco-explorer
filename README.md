@@ -4,7 +4,7 @@ A self-hosted explorer for BitcoinOil mainnet or testnet. BitcoinOil Core provid
 blocks, transactions, mempool and public MWEB data. A separately indexed ElectrumX
 instance provides transparent address histories, balances and unspent outputs.
 
-- [BitcoinOil Core v25.3.1](https://github.com/escapeneo/bitcoinoil/releases/tag/v25.3.1)
+- [BitcoinOil Core v25.3.2](https://github.com/escapeneo/bitcoinoil/releases/tag/v25.3.2)
 - [Install the explorer and ElectrumX](DEPLOY.md)
 - [ElectrumX BitcoinOil patch](electrumx/bitcoinoil.patch)
 
@@ -27,4 +27,9 @@ blocks captured from BitcoinOil Core on testnet. ElectrumX indexed blocks
 0–148, through MWEB activation at 110. The explorer agreed with the node on
 the hash and MWEB balance of AuxPoW block 148, displayed a peg-out and served
 transparent address history from the index. PHP lint and Compose configuration
-validation passed. Full mainnet synchronization was not part of this run.
+validation passed. 
+
+The ElectrumX index was later synced on mainnet through block 157807. In 187 sampled
+blocks, including those around 155000 and 157500, the block hashes and 323 transaction
+positions matched the node. The history of 302 output scripts and the balances of
+63 of them (including HogEx scripts) matched too. The explorer was not part of this run.

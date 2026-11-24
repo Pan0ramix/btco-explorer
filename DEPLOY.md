@@ -1,6 +1,6 @@
 # Install on a Linux host
 
-1. Run [BitcoinOil Core v25.3.1](https://github.com/escapeneo/bitcoinoil/releases/tag/v25.3.1)
+1. Run [BitcoinOil Core v25.3.2](https://github.com/escapeneo/bitcoinoil/releases/tag/v25.3.2)
    as a dedicated explorer node with `server=1`, `txindex=1`, `prune=0`,
    `disablewallet=1`, and RPC authentication. Keep the RPC on loopback.
    Leave RPC serialization at its default to preserve the MWEB marker in the
@@ -30,3 +30,30 @@ The address index must finish syncing before address histories are usable.
 Blocks and transactions come directly from Core. To check the transition,
 compare the explorer's height, block hash, AuxPoW status and MWEB balance
 against `getblockhash` and `getblock <hash> 1` on the same node.
+
+## Public Electrum server
+
+This opens the index to wallets on TLS port 50002. Keep the node RPC private.
+The server was checked against mainnet through block 157807, but there is no
+released BitcoinOil Electrum wallet yet: a wallet must parse AuxPoW headers and
+verify the ASERT difficulty before it can use this server safely.
+
+1. Reserve 2 vCPU, 2 GB RAM for the index and node, and 20 GB of SSD. The mainnet
+   index itself used 36 MB on disk and under 300 MB of RAM in November 2026.
+2. Put a certificate in a directory as `fullchain.pem` and `privkey.pem`, readable
+   by uid 10001, and set `BTCO_ELECTRUM_CERTS` in `.env` to that directory.
+   Restart the container after each renewal.
+3. Start it:
+
+   ```bash
+   docker compose -f compose.yaml -f compose.electrum.yaml up -d --build electrumx
+   ```
+
+4. Open TCP port 50002 on the firewall or router. Do not open 50001 or the RPC port.
+5. From another network:
+
+   ```bash
+   echo '{"id":1,"method":"blockchain.headers.subscribe","params":[]}' | timeout 10 openssl s_client -quiet -connect YOUR_HOST:50002
+   ```
+
+   The reported height must match `bitcoinoil-cli getblockcount`.
