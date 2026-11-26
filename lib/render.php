@@ -98,7 +98,7 @@ function lx_meta_social(string $title, string $desc, string $url, string $image 
         . '<meta property="og:image" content="' . $i . '">' . "\n"
         . '<meta property="og:image:width" content="1200">' . "\n"
         . '<meta property="og:image:height" content="630">' . "\n"
-        . '<meta property="og:image:alt" content="BitcoinOil Explorer - Litecoin (BTCO) block explorer">' . "\n"
+        . '<meta property="og:image:alt" content="BitcoinOil Explorer, the BitcoinOil (BTCO) block explorer with MWEB support">' . "\n"
         . '<meta property="og:locale" content="en_US">' . "\n"
         . '<meta name="twitter:card" content="summary_large_image">' . "\n"
         . '<meta name="twitter:title" content="' . $t . '">' . "\n"
